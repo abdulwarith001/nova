@@ -1,0 +1,28 @@
+{
+  "name": "@nova/runtime",
+  "version": "0.1.0",
+  "description": "Nova core runtime in TypeScript",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "test": "vitest",
+    "bench": "vitest bench"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.3.0",
+    "gray-matter": "^4.0.3",
+    "hnswlib-node": "^3.0.0",
+    "isolated-vm": "^4.7.2",
+    "piscina": "^4.3.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.2.0"
+  }
+}

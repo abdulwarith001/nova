@@ -1,0 +1,84 @@
+{
+  "name": "nova",
+  "version": "0.1.0",
+  "description": "Next-generation AI super agent",
+  "private": true,
+  "workspaces": [
+    "runtime",
+    "gateway",
+    "agent",
+    "sdk/typescript",
+    "cli",
+    "studio"
+  ],
+  "scripts": {
+    "build": "npm run build:core && npm run build:gateway && npm run build:agent && npm run build:cli && npm run build:studio",
+    "build:core": "cd core && cargo build --release",
+    "build:gateway": "cd gateway && npm run build",
+    "build:agent": "cd agent && npm run build",
+    "build:cli": "cd cli && npm run build",
+    "build:studio": "cd studio && npm run build",
+    "test": "npm run test:core && npm run test:ts",
+    "test:core": "cd core && cargo test",
+    "test:ts": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "check:secrets": "bash scripts/check-secrets.sh",
+    "dev:gateway": "cd gateway && npm run dev",
+    "dev:studio": "cd studio && npm run dev",
+    "nova": "node cli/dist/index.js",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
+    "example:runtime": "tsx examples/runtime-example.ts",
+    "example:agent": "tsx examples/agent-example.ts",
+    "demo": "tsx examples/end-to-end-demo.ts",
+    "demo:autonomous": "tsx examples/autonomous-demo.ts",
+    "demo:browser": "tsx examples/browser-demo.ts",
+    "demo:memory": "tsx examples/memory-demo.ts",
+    "demo:multi-agent": "tsx examples/multi-agent-demo.ts",
+    "demo:reminders": "tsx examples/reminders-demo.ts",
+    "benchmark:chat": "tsx scripts/benchmark-chat.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/node-cron": "^3.0.11",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.4",
+    "typescript": "^5.4.0",
+    "vitest": "^1.2.0"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abdulwarith001/nova.git"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "llm",
+    "automation",
+    "assistant"
+  ],
+  "author": "Nova Team",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "cron-parser": "^5.5.0",
+    "dotenv": "^17.2.3",
+    "google-auth-library": "^10.5.0",
+    "googleapis": "^171.2.0",
+    "inquirer": "^13.2.2",
+    "node-cron": "^4.2.1",
+    "node-machine-id": "^1.1.12",
+    "open": "^11.0.0",
+    "ora": "^9.2.0",
+    "playwright": "^1.58.1",
+    "ws": "^8.19.0"
+  }
+}

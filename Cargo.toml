@@ -1,0 +1,33 @@
+[workspace]
+members = [
+    "core",
+    "core/executor",
+    "core/memory",
+    "core/security",
+    "core/tools",
+    "core/planner",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Nova Team"]
+license = "MIT"
+repository = "https://github.com/yourusername/nova"
+
+[workspace.dependencies]
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

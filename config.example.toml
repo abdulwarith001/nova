@@ -1,0 +1,42 @@
+# Nova Configuration
+
+[agent]
+model = "anthropic/claude-opus-4-5"
+temperature = 0.7
+max_tokens = 4096
+
+[gateway]
+port = 18789
+bind = "127.0.0.1"
+log_level = "info"
+
+[memory]
+path = "~/.nova/memory.db"
+vector_dimensions = 1536
+max_memories = 1000000
+
+[security]
+sandbox_mode = "process"  # none, process, container, vm
+allowed_tools = ["bash", "read", "write", "browser"]
+denied_tools = []
+
+[executor]
+max_parallel = 10
+default_timeout_ms = 30000
+
+[channels]
+# Telegram configuration
+[channels.telegram]
+enabled = false
+bot_token = ""
+
+# Discord configuration
+[channels.discord]
+enabled = false
+bot_token = ""
+
+# Slack configuration
+[channels.slack]
+enabled = false
+bot_token = ""
+signing_secret = ""

@@ -1,0 +1,34 @@
+{
+  "suites": [
+    {
+      "label": "simple-quick",
+      "count": 8,
+      "expectCitations": false,
+      "basePrompts": [
+        "hi",
+        "what can you do?",
+        "give me one productivity tip",
+        "summarize the benefits of walking daily in one sentence"
+      ]
+    },
+    {
+      "label": "tool-quick",
+      "count": 6,
+      "expectCitations": true,
+      "basePrompts": [
+        "search the web for the latest AI news headlines",
+        "find information about TypeScript performance best practices",
+        "search for recent updates about OpenAI API models"
+      ]
+    },
+    {
+      "label": "complex-quick",
+      "count": 4,
+      "expectCitations": true,
+      "basePrompts": [
+        "search the web and run a multi-step autonomous workflow to collect 3 findings on AI latency optimization",
+        "execute a step by step tool workflow to find and summarize current backend performance tuning practices"
+      ]
+    }
+  ]
+}

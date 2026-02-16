@@ -1,0 +1,38 @@
+{
+  "suites": [
+    {
+      "label": "simple",
+      "count": 50,
+      "expectCitations": false,
+      "basePrompts": [
+        "hi",
+        "what can you do?",
+        "give me one productivity tip",
+        "summarize the benefits of walking daily in one sentence",
+        "explain what latency means in software"
+      ]
+    },
+    {
+      "label": "tool",
+      "count": 20,
+      "expectCitations": true,
+      "basePrompts": [
+        "search the web for the latest AI news headlines",
+        "find information about TypeScript performance best practices",
+        "search for recent updates about OpenAI API models",
+        "look up guidance for reducing backend latency",
+        "find examples of websocket benchmarking scripts"
+      ]
+    },
+    {
+      "label": "complex",
+      "count": 10,
+      "expectCitations": true,
+      "basePrompts": [
+        "search the web and run a multi-step autonomous workflow to collect 3 findings on AI latency optimization",
+        "execute a step by step tool workflow to find and summarize current backend performance tuning practices",
+        "plan and execute a multi-step search process to gather latency optimization ideas"
+      ]
+    }
+  ]
+}
