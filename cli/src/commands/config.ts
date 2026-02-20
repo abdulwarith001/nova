@@ -49,11 +49,7 @@ export async function configCommand(
       }
       getConfig(key);
       break;
-    case "email-setup": {
-      const { emailSetup } = await import("./email-setup.js");
-      await emailSetup();
-      break;
-    }
+
     case "env-set":
       if (!key || !value) {
         console.log(
@@ -296,7 +292,7 @@ function showHelp() {
   console.log(
     chalk.gray("  nova config set notificationEmail you@example.com"),
   );
-  console.log(chalk.gray("  nova config email-setup"));
+
   console.log(chalk.gray("  nova config env-get OPENAI_API_KEY"));
   console.log(chalk.gray("  nova config env-set OPENAI_API_KEY sk-...\n"));
   console.log("Config keys:");
@@ -307,8 +303,6 @@ function showHelp() {
   );
   console.log("\nCommon env keys:");
   console.log(
-    chalk.gray(
-      "  OPENAI_API_KEY, NOTIFICATION_EMAIL, TELEGRAM_BOT_TOKEN\n",
-    ),
+    chalk.gray("  OPENAI_API_KEY, NOTIFICATION_EMAIL, TELEGRAM_BOT_TOKEN\n"),
   );
 }

@@ -1,4 +1,3 @@
-import { ToolSelector } from "../../../runtime/src/tool-selector";
 import { Agent } from "../index.js";
 import { ChainOfThought } from "./chain-of-thought.js";
 import { ReasoningLogger } from "./logger.js";
@@ -24,7 +23,6 @@ import {
 } from "./types.js";
 
 export class ReasoningEngine {
-  private toolSelector: ToolSelector;
   private chainOfThought?: ChainOfThought;
   private llmChat?: (
     prompt: string,
@@ -39,7 +37,6 @@ export class ReasoningEngine {
     config: ReasoningEngineConfig = {},
     logDir?: string,
   ) {
-    this.toolSelector = new ToolSelector();
     this.config = {
       mode: config.mode ?? "full",
       verbosity: config.verbosity ?? "summary",
@@ -190,10 +187,20 @@ export class ReasoningEngine {
   }
 
   async orient(observation: ObservationResult): Promise<OrientationResult> {
-    const scored = this.toolSelector.scoreTools(
-      observation.task,
-      observation.availableTools as any,
-    );
+    // Inline tool scoring (keyword match)
+    const queryWords = observation.task.toLowerCase().split(/\s+/);
+    const scored = (observation.availableTools as any[])
+      .map((tool: any) => {
+        const haystack =
+          `${tool.name} ${tool.description || ""} ${(tool.keywords || []).join(" ")}`.toLowerCase();
+        const score = queryWords.reduce(
+          (s, w) => s + (haystack.includes(w) ? 1 : 0),
+          0,
+        );
+        return { tool, score };
+      })
+      .filter((e) => e.score > 0)
+      .sort((a, b) => b.score - a.score);
     const candidates = scored.map((entry: any) => ({
       tool: entry.tool as any,
       score: entry.score,
