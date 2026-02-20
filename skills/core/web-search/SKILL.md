@@ -1,15 +1,15 @@
 ---
 name: Web Search
-description: Search the web using Serper.dev API for news, information, and content
+description: Search the web using Nova's browser-native search and extraction tools
 category: browser
-keywords: [search, google, web, find, query, news, information, lookup]
+keywords: [search, browser, web, find, query, news, information, lookup]
 ---
 
 # Web Search
 
 ## Overview
 
-Search the web using Serper.dev API - a fast, reliable Google Search API alternative. Get search results, news, images, and more without the complexity of web scraping.
+Search the web using Nova's browser-native tooling. Discovery is handled by `browser_search`, then deeper retrieval is done with `browser_navigate`, `browser_extract`, and `browser_html`.
 
 ## When to Use
 
@@ -17,130 +17,62 @@ Search the web using Serper.dev API - a fast, reliable Google Search API alterna
 - Need current information or news
 - Looking up facts, articles, or content
 - Finding websites or resources
-- Getting latest news about a topic
+- Getting latest updates about a topic
 
 ## Prerequisites
 
-Set your Serper API key in `~/.nova/.env`:
-
-```bash
-SERPER_API_KEY=your_api_key_here
-```
-
-Get a free API key at: https://serper.dev (2,500 free searches/month)
+No third-party search API key is required.
 
 ## Available Tools
 
-- **web_search** - Search the web and get structured results
+- **browser_search** - Discover relevant links and snippets using browser-based search
+- **browser_navigate** - Open a specific URL
+- **browser_extract** - Extract page text for analysis
+- **browser_html** - Retrieve page HTML when extraction quality is poor
 
-## Examples
+## Example Flow
 
 ### General Search
 
-**User**: "Search for 'AI agents'"
+**User**: "Search for AI agents"
 
-**Nova**: Uses `web_search`:
+1. Use `browser_search` with query `AI agents`
+2. Open top sources with `browser_navigate`
+3. Extract content using `browser_extract`
+4. Synthesize with citations
 
-```json
-{
-  "query": "AI agents",
-  "type": "search"
-}
-```
-
-Returns top 10 results with title, link, and snippet.
-
-### News Search
+### News Query
 
 **User**: "Latest news about Seyi Vibez"
 
-**Nova**: Uses `web_search`:
-
-```json
-{
-  "query": "Seyi Vibez",
-  "type": "news"
-}
-```
-
-Returns recent news articles.
-
-### Image Search
-
-**User**: "Find images of golden retrievers"
-
-**Nova**: Uses `web_search`:
-
-```json
-{
-  "query": "golden retrievers",
-  "type": "images"
-}
-```
-
-### Location-Based Search
-
-**User**: "Best restaurants in Lagos"
-
-**Nova**: Uses `web_search`:
-
-```json
-{
-  "query": "best restaurants",
-  "location": "Lagos, Nigeria"
-}
-```
-
-## Search Types
-
-- **search** - General web search (default)
-- **news** - News articles
-- **images** - Image results
-- **videos** - Video results
-- **places** - Local business/places
+1. Use `browser_search` with query `Seyi Vibez latest news`
+2. Verify multiple sources before final response
+3. Cite source URLs in output
 
 ## Best Practices
 
 1. **Be specific** - "latest albums by Wizkid" > "Wizkid"
-2. **Use quotes** for exact phrases - `"machine learning"`
-3. **Specify time** for news - "recent", "latest", "2024"
-4. **Combine with browser** - search first, then scrape specific pages
-5. **Respect rate limits** - 2,500 free searches/month
+2. **Verify multiple sources** before finalizing research answers
+3. **Extract after navigate** - do not rely on snippets alone
+4. **Prefer primary sources** for high-confidence claims
+5. **Call out uncertainty** when information conflicts or is incomplete
 
-## Response Format
+## Typical Response Shape
 
 ```json
 {
-  "organic": [
+  "results": [
     {
       "title": "Result title",
-      "link": "https://...",
-      "snippet": "Description..."
+      "url": "https://...",
+      "description": "Short snippet"
     }
-  ],
-  "news": [...],
-  "answerBox": {...}
+  ]
 }
 ```
 
-## Advantages over Browser Scraping
-
-✅ **Faster** - No browser rendering needed  
-✅ **Reliable** - No CSS selector breakage  
-✅ **Structured** - Clean JSON responses  
-✅ **Current** - Always up-to-date results  
-✅ **No CAPTCHAs** - API authentication
-
 ## Limitations
 
-- Rate limited (2,500/month free tier)
-- Requires API key
-- Costs money beyond free tier
-- Some search features limited
-
-## When to Use Browser Instead
-
-- Need to interact with a specific website
-- Filling forms or clicking buttons
-- Screenshots needed
-- Dynamic content requiring JavaScript
+- Some pages are anti-bot or JS-heavy and may need retries
+- Dynamic sites may require additional navigation/click steps
+- Source quality varies, so synthesis should always include confidence/uncertainty

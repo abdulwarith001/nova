@@ -7,7 +7,7 @@ type ChatResponse = {
   response?: string;
   success?: boolean;
   message?: string;
-  research?: {
+  externalData?: {
     sources?: Array<{ title?: string; url?: string; whyRelevant?: string }>;
     confidence?: number;
     uncertainty?: string;
@@ -147,8 +147,8 @@ async function runBatch(
       const response = await sendChat(ws, prompt);
       const elapsed = performance.now() - start;
       const fallbackReason = extractFallbackReason(response);
-      const citations = Array.isArray(response.research?.sources)
-        ? response.research!.sources!.length
+      const citations = Array.isArray(response.externalData?.sources)
+        ? response.externalData!.sources!.length
         : 0;
       const text = String(response.response || "").trim();
       const success = response.success === true;

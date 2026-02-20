@@ -101,6 +101,44 @@ Owner-only access is enforced by default.
 
 For full details, see `docs/guides/telegram-setup.md`.
 
+Live progress streaming is enabled by default for long web-assist turns.
+
+- Disable gateway progress frames: `NOVA_CHAT_PROGRESS_STREAM=false`
+- Slow down Telegram progress updates: `NOVA_TELEGRAM_PROGRESS_MIN_INTERVAL_MS=1500`
+- Cap Telegram progress messages per turn: `NOVA_TELEGRAM_PROGRESS_MAX_MESSAGES_PER_TURN=6`
+- Disable CLI progress rendering per session: `nova chat --no-progress`
+
+Web-assisted external data is available behind feature flags.
+
+- Enable web-agent engine: `NOVA_WEB_AGENT_ENABLED=true|false` (default: `true`)
+- External-data routing mode: `NOVA_CHAT_EXTERNAL_DATA_MODE=auto|always` (default: `auto`)
+- Browser visibility mode (local backend): `NOVA_WEB_HEADLESS=true|false` (default: `true`)
+- Browser backend mode: `NOVA_WEB_BACKEND=auto|steel|browserbase|local` (default: `auto`)
+- Steel API key: `STEEL_API_KEY=<key>`
+- Steel live view enabled: `NOVA_WEB_STEEL_ENABLE_LIVE_VIEW=true|false` (default: `true`)
+- Steel session timeout: `NOVA_WEB_STEEL_SESSION_TIMEOUT_MS=600000`
+- Steel max concurrent sessions: `NOVA_WEB_STEEL_MAX_CONCURRENCY=1`
+- Legacy Browserbase keys are still supported when `NOVA_WEB_BACKEND=browserbase`.
+- Fallback to local backend when remote fails: `NOVA_WEB_BACKEND_FALLBACK_ON_ERROR=true|false` (default: `true`)
+- Expose live-view link in progress messages: `NOVA_WEB_EXPOSE_LIVE_VIEW_LINK=true|false` (default: `true`)
+- Default browser profile for web-assist sessions: `NOVA_WEB_PROFILE_ID=<profileId>` (optional)
+- Stream thought summaries in progress frames: `NOVA_CHAT_STREAM_THOUGHTS=true|false` (default: `false`)
+- Concise response sentence cap: `NOVA_CHAT_CONCISE_MAX_SENTENCES=4`
+- Concise response character cap: `NOVA_CHAT_CONCISE_MAX_CHARS=650`
+- Max search results per turn: `NOVA_WEB_AGENT_MAX_SEARCH_RESULTS=8`
+- Max pages visited per turn: `NOVA_WEB_AGENT_MAX_PAGES_PER_TURN=3`
+
+For visible local browsing, set `NOVA_WEB_HEADLESS=false` in `~/.nova/.env` and restart the daemon.
+Session-to-profile assignments are persisted at `~/.nova/web-agent/profile-assignments.json`.
+Remote provider session/context assignments are persisted at `~/.nova/web-agent/remote-context-assignments.json`.
+
+Human-like web interaction tools are available for autonomous browsing:
+
+- `web_session_start`, `web_session_end` (persistent profile-backed browser sessions)
+- `web_observe`, `web_decide_next`, `web_act` (plan-act-observe control loop)
+- `web_search`, `web_extract_structured` (multi-engine search + structured extraction)
+- `curl` (raw HTTP request tool for API/web endpoints)
+
 ---
 
 ## 📖 Usage
@@ -144,7 +182,12 @@ console.log(result);
 // Enable browser tools
 const runtime = await Runtime.create({
   security: {
-    allowedTools: ["browser_navigate", "browser_screenshot", "browser_extract"],
+    allowedTools: [
+      "web_session_start",
+      "web_observe",
+      "web_act",
+      "web_extract_structured",
+    ],
   },
 });
 
@@ -167,7 +210,7 @@ await agent.execute("Visit example.com and extract the main heading");
 │  ┌─────────────────────────────────┐   │
 │  │  Executor (Piscina Pool)        │   │
 │  │  ├─ Worker 1 (bash, read, write)│   │
-│  │  ├─ Worker 2 (browser tools)    │   │
+│  │  ├─ Worker 2 (web-agent tools)  │   │
 │  │  ├─ Worker 3 (...)              │   │
 │  │  └─ Worker 4 (...)              │   │
 │  └─────────────────────────────────┘   │
@@ -195,15 +238,15 @@ await agent.execute("Visit example.com and extract the main heading");
 
 - `bash` - Execute shell commands
 
-### Browser (Playwright)
+### Browser (Web Agent)
 
-- `browser_navigate` - Navigate to URLs
-- `browser_extract` - Extract text/data
-- `browser_screenshot` - Capture pages
-- `browser_click` - Click elements
-- `browser_fill` - Fill forms
-- `browser_html` - Get page source
-- `browser_close` - Clean up browser
+- `web_session_start` - Start/resume persistent profile session
+- `web_observe` - Capture current page state + optional screenshot
+- `web_decide_next` - Decide next action from goal and world state
+- `web_act` - Execute navigate/click/fill/submit/scroll/wait/extract/search actions
+- `web_search` - Multi-engine search with reranking
+- `web_extract_structured` - Structured extraction from active page
+- `web_session_end` - End and release session
 
 ---
 
@@ -296,7 +339,7 @@ nova/
 │   │   ├── index.ts       # Main runtime
 │   │   ├── executor.ts    # Parallel executor
 │   │   ├── worker.ts      # Tool execution worker
-│   │   ├── browser-tools.ts  # Browser automation
+│   │   ├── web-agent/     # Web-agent architecture (sessions/actions/search/policy)
 │   │   ├── memory.ts      # Memory store
 │   │   ├── security.ts    # Security manager
 │   │   └── tools.ts       # Tool registry

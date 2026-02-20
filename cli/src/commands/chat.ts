@@ -5,7 +5,94 @@ import WebSocket from "ws";
 import { loadConfig } from "../utils/config.js";
 import { daemonCommand } from "./daemon.js";
 
-export async function chatCommand(options: { agent?: string }) {
+type ProgressFrame = {
+  type: "response_progress";
+  requestId?: string;
+  stage?: string;
+  message?: string;
+  timestamp?: number;
+  iteration?: number;
+};
+
+type ResponseFrame = {
+  type?: string;
+  requestId?: string;
+  response?: string;
+  message?: string;
+  success?: boolean;
+  thinking?: string;
+  reasoningSteps?: Array<{
+    type: string;
+    content: string;
+    confidence?: number;
+  }>;
+};
+
+function createRequestId(): string {
+  return `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function waitForChatResponse(
+  ws: WebSocket,
+  requestId: string,
+  onProgress: (frame: ProgressFrame) => void,
+): Promise<ResponseFrame> {
+  return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Response timeout"));
+    }, 60000);
+
+    const onMessage = (data: WebSocket.RawData) => {
+      let parsed: any;
+      try {
+        parsed = JSON.parse(data.toString());
+      } catch {
+        cleanup();
+        resolve({ response: String(data), success: true });
+        return;
+      }
+
+      if (parsed?.type === "response_progress") {
+        if (parsed.requestId && parsed.requestId !== requestId) return;
+        onProgress(parsed as ProgressFrame);
+        return;
+      }
+
+      if (parsed?.type === "error") {
+        cleanup();
+        reject(new Error(String(parsed.message || "Unknown gateway error")));
+        return;
+      }
+
+      const isResponseFrame =
+        parsed?.type === "response" ||
+        parsed?.response !== undefined ||
+        parsed?.message !== undefined;
+      if (!isResponseFrame) return;
+      if (parsed.requestId && parsed.requestId !== requestId) return;
+
+      cleanup();
+      resolve(parsed as ResponseFrame);
+    };
+
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+    };
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+  });
+}
+
+export async function chatCommand(options: { agent?: string; progress?: boolean }) {
   console.log(chalk.cyan.bold("\n💬 Nova Chat\n"));
 
   if (options.agent) {
@@ -37,6 +124,9 @@ export async function chatCommand(options: { agent?: string }) {
     });
 
     console.log(chalk.gray('Type "exit" or "quit" to end conversation\n'));
+    const showProgress =
+      options.progress !== false && process.env.NOVA_CHAT_SHOW_PROGRESS !== "false";
+    const showThoughtFrames = process.env.NOVA_CHAT_STREAM_THOUGHTS === "true";
 
     let conversationHistory: any[] = [];
 
@@ -62,12 +152,14 @@ export async function chatCommand(options: { agent?: string }) {
       }
 
       const thinking = ora("Nova is thinking...").start();
+      const requestId = createRequestId();
 
       try {
         // Send message to daemon
         ws.send(
           JSON.stringify({
             type: "chat",
+            requestId,
             message,
             agent: options.agent,
             history: conversationHistory,
@@ -75,21 +167,25 @@ export async function chatCommand(options: { agent?: string }) {
         );
 
         // Wait for response
-        const response: any = await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            reject(new Error("Response timeout"));
-          }, 60000); // 60 second timeout
-
-          ws.once("message", (data) => {
-            clearTimeout(timeout);
-            try {
-              const parsed = JSON.parse(data.toString());
-              resolve(parsed);
-            } catch {
-              resolve({ response: String(data) });
+        const response = await waitForChatResponse(
+          ws,
+          requestId,
+          (progressFrame) => {
+            if (!showProgress) return;
+            const text = String(progressFrame.message || "").trim();
+            if (!text) return;
+            const isThoughtFrame =
+              text.startsWith("Intent:") || text.startsWith("Next action:");
+            if (isThoughtFrame && !showThoughtFrames) return;
+            if (isThoughtFrame) {
+              thinking.stop();
+              console.log(chalk.dim(`  🧭 ${text}`));
+              thinking.start("Nova is thinking...");
+              return;
             }
-          });
-        });
+            thinking.text = text;
+          },
+        );
 
         thinking.stop();
 

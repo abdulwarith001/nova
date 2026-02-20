@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 echo "Running lightweight secret scan..."
 
 # Intentionally conservative patterns for obvious accidental leaks.
-PATTERN='(sk-proj-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|[0-9]{8,}:[A-Za-z0-9_-]{30,}|SERPER_API_KEY[[:space:]]*=[[:space:]]*[a-f0-9]{32,}|OPENAI_API_KEY[[:space:]]*=[[:space:]]*sk-[A-Za-z0-9_-]{16,})'
+PATTERN='(sk-proj-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|[0-9]{8,}:[A-Za-z0-9_-]{30,}|OPENAI_API_KEY[[:space:]]*=[[:space:]]*sk-[A-Za-z0-9_-]{16,})'
 
 if rg -n --pcre2 "$PATTERN" \
   --glob '!node_modules/**' \

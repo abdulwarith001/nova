@@ -54,18 +54,31 @@ export async function reasoningCommand(options: {
   );
 
   for (const line of displayed) {
-    // Color the lines based on content
-    if (line.includes("[THINKING]")) {
-      console.log(chalk.blue(line));
-    } else if (line.includes("[PLAN]")) {
-      console.log(chalk.magenta(line));
-    } else if (line.includes("[REFLECT]")) {
-      console.log(chalk.yellow(line));
-    } else if (line.includes("[ERROR]")) {
-      console.log(chalk.red(line));
-    } else if (line.includes("[TRACE]")) {
-      console.log(chalk.green(line));
-    } else if (line.startsWith("===")) {
+    // OODA phase colors
+    if (line.includes("[OBSERVE]")) {
+      console.log(chalk.cyan("👁  " + line));
+    } else if (line.includes("[ORIENT]")) {
+      console.log(chalk.blue("🧭 " + line));
+    } else if (line.includes("[DECIDE]")) {
+      console.log(chalk.magenta("⚡ " + line));
+    } else if (line.includes("[ACT]")) {
+      console.log(chalk.green("🎯 " + line));
+      // Legacy log types
+    } else if (line.includes("[THINKING]") || line.includes("THINKING")) {
+      console.log(chalk.blue("💭 " + line));
+    } else if (line.includes("[PLAN]") || line.includes("PLAN CREATED")) {
+      console.log(chalk.magenta("📋 " + line));
+    } else if (line.includes("[REFLECT]") || line.includes("REFLECTION")) {
+      console.log(chalk.yellow("🪞 " + line));
+    } else if (line.includes("[ERROR]") || line.includes("❌")) {
+      console.log(chalk.red("❌ " + line));
+    } else if (line.includes("[TRACE]") || line.includes("TASK COMPLETE")) {
+      console.log(chalk.green("🏁 " + line));
+    } else if (line.includes("TOOL START")) {
+      console.log(chalk.yellow("🔧 " + line));
+    } else if (line.includes("TOOL COMPLETE")) {
+      console.log(chalk.green("✅ " + line));
+    } else if (line.startsWith("===") || line.startsWith("═")) {
       console.log(chalk.dim(line));
     } else {
       console.log(chalk.gray(line));

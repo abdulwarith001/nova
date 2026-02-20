@@ -211,8 +211,8 @@ export class MemoryStore {
     const limit = options.limit || 10;
     const minImportance = options.minImportance || 0;
 
-    // Escape FTS5 special characters
-    const escapedQuery = query.replace(/[:".\-()]/g, " ").trim();
+    // Escape FTS5 special characters (including @ for email addresses)
+    const escapedQuery = query.replace(/[@:".\\\-()]/g, " ").trim();
 
     if (!escapedQuery) {
       // If query is empty after escaping, just return recent memories

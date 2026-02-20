@@ -60,7 +60,7 @@ export async function configCommand(
           chalk.red("\n❌ Usage: nova config env-set <KEY> <value>\n"),
         );
         console.log(
-          chalk.gray("Example: nova config env-set SERPER_API_KEY abc123\n"),
+          chalk.gray("Example: nova config env-set OPENAI_API_KEY sk-...\n"),
         );
         return;
       }
@@ -298,7 +298,7 @@ function showHelp() {
   );
   console.log(chalk.gray("  nova config email-setup"));
   console.log(chalk.gray("  nova config env-get OPENAI_API_KEY"));
-  console.log(chalk.gray("  nova config env-set SERPER_API_KEY abc123\n"));
+  console.log(chalk.gray("  nova config env-set OPENAI_API_KEY sk-...\n"));
   console.log("Config keys:");
   console.log(
     chalk.gray(
@@ -308,7 +308,7 @@ function showHelp() {
   console.log("\nCommon env keys:");
   console.log(
     chalk.gray(
-      "  OPENAI_API_KEY, SERPER_API_KEY, NOTIFICATION_EMAIL, TELEGRAM_BOT_TOKEN\n",
+      "  OPENAI_API_KEY, NOTIFICATION_EMAIL, TELEGRAM_BOT_TOKEN\n",
     ),
   );
 }

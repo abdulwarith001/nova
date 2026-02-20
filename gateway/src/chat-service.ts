@@ -20,7 +20,7 @@ export interface ChatTurnInput {
   message: string;
   sessionId: string;
   historyKey: string;
-  channel: "ws" | "telegram";
+  channel: "ws" | "telegram" | 'whatsapp';
 }
 
 export interface ChatTurnOutput {

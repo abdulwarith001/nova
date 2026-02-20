@@ -175,7 +175,7 @@ Task payload shape:
 
 Rules:
 1. If taskType is "research":
-   - Use the search_web tool with the provided query.
+   - Use the browser_search tool with the provided query.
    - Summarize the results into a short paragraph (4-6 sentences).
    - Include a "Sources" section with bullet URLs or titles.
    - Send the email using email_send to recipientEmail.
@@ -248,8 +248,8 @@ export class AgentOrchestrator {
         role === "reminder"
           ? {
               ...this.config,
-              allowedTools: ["search_web", "email_send"],
-              toolLimits: { search_web: 1, email_send: 1 },
+              allowedTools: ["browser_search", "email_send"],
+              toolLimits: { browser_search: 1, email_send: 1 },
             }
           : this.config;
       const agent = new SpecializedAgent(this.runtime, role, roleConfig);

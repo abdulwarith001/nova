@@ -1,11 +1,17 @@
 import { Executor, ExecutorConfig } from "./executor";
 import { MemoryStore } from "./memory";
+import {
+  type ApprovalRequest,
+  MemoryV2,
+  type AutonomyEvaluationResult,
+  type ChannelType,
+  type LearningJob,
+  type ProactiveEvent,
+} from "./memory-v2";
 import { SecurityManager, SecurityConfig } from "./security";
-import { ToolRegistry } from "./tools";
+import { ToolExecutionContext, ToolRegistry } from "./tools";
 import { Planner } from "./planner";
 
-import { GmailClient } from "./email/gmail-client.js";
-import { AgentConfig } from "../../agent/src/index.ts";
 import { config } from "dotenv";
 import { homedir } from "os";
 import { join } from "path";
@@ -33,9 +39,15 @@ function loadRuntimeConfig(): { notificationEmail?: string } {
 
 export interface RuntimeConfig {
   memoryPath: string;
+  memoryV2Path?: string;
+  enableMemoryV2?: boolean;
   security: SecurityConfig;
   executor: ExecutorConfig;
-  agent: AgentConfig;
+  agent: {
+    provider: "openai" | "anthropic" | "google";
+    model: string;
+    apiKey?: string;
+  };
 }
 
 export interface Task {
@@ -65,8 +77,7 @@ export class Runtime {
   private security: SecurityManager;
   private tools: ToolRegistry;
   private planner: Planner;
-
-  private gmailClient: GmailClient | null;
+  private memoryV2: MemoryV2 | null;
 
   private constructor(
     executor: Executor,
@@ -74,14 +85,14 @@ export class Runtime {
     security: SecurityManager,
     tools: ToolRegistry,
     planner: Planner,
-    gmailClient: GmailClient | null,
+    memoryV2: MemoryV2 | null,
   ) {
     this.executor = executor;
     this.memory = memory;
     this.security = security;
     this.tools = tools;
     this.planner = planner;
-    this.gmailClient = gmailClient;
+    this.memoryV2 = memoryV2;
   }
 
   /**
@@ -89,6 +100,15 @@ export class Runtime {
    */
   static async create(config: RuntimeConfig): Promise<Runtime> {
     const memory = await MemoryStore.create(config.memoryPath);
+    const memoryV2 =
+      config.enableMemoryV2 === true
+        ? await MemoryV2.create(
+            config.memoryV2Path ||
+              (config.memoryPath === ":memory:"
+                ? ":memory:"
+                : config.memoryPath.replace(/memory(\.db)?$/, "memory-v2.db")),
+          )
+        : null;
     const security = new SecurityManager(config.security);
     const tools = new ToolRegistry();
     const executor = new Executor(config.executor);
@@ -124,7 +144,10 @@ export class Runtime {
         const query = String(params.query || "").trim();
         const limit = Math.max(
           1,
-          Math.min(20, Number.isFinite(Number(params.limit)) ? Number(params.limit) : 5),
+          Math.min(
+            20,
+            Number.isFinite(Number(params.limit)) ? Number(params.limit) : 5,
+          ),
         );
         const category = String(params.category || "").trim();
         const minImportance = Number.isFinite(Number(params.minImportance))
@@ -160,277 +183,13 @@ export class Runtime {
       },
     });
 
-    const runtimeConfig = loadRuntimeConfig();
-    const defaultNotificationEmail =
-      process.env.NOTIFICATION_EMAIL || runtimeConfig.notificationEmail;
-
-    // Initialize Gmail client if configured (decrypt credentials)
-    let gmailClient: GmailClient | null = null;
-    if (GmailClient.isConfigured()) {
-      try {
-        // Import decrypt function
-        const { decrypt } = await import("../../cli/src/utils/encryption");
-        gmailClient = new GmailClient({
-          clientId: decrypt(process.env.GMAIL_CLIENT_ID!),
-          clientSecret: decrypt(process.env.GMAIL_CLIENT_SECRET!),
-          refreshToken: decrypt(process.env.GMAIL_REFRESH_TOKEN!),
-        });
-        console.log("📧 Gmail client initialized");
-      } catch (error) {
-        console.log("⚠️  Gmail not configured properly:", error);
-      }
-    }
-
-    // Register Gmail email tools if configured
-    if (gmailClient) {
-      // email_read - Read recent emails
-      tools.register({
-        name: "email_read",
-        description:
-          "Read recent emails from Gmail inbox. Can filter with Gmail query syntax.",
-        parametersSchema: {
-          type: "object",
-          properties: {
-            maxResults: {
-              type: "number",
-              description:
-                "Number of emails to retrieve (default: 10, max: 50)",
-            },
-            query: {
-              type: "string",
-              description:
-                "Gmail search query (e.g., 'is:unread', 'from:boss@company.com', 'subject:urgent')",
-            },
-          },
-        },
-        permissions: [],
-        execute: async (params: any) => {
-          const messages = await gmailClient.listMessages({
-            maxResults: Math.min(params.maxResults || 10, 50),
-            query: params.query,
-          });
-          return {
-            count: messages.length,
-            messages: messages.map((m) => ({
-              id: m.id,
-              from: m.from,
-              subject: m.subject,
-              snippet: m.snippet,
-              date: m.date.toISOString(),
-              isUnread: m.isUnread,
-            })),
-          };
-        },
-      });
-
-      // email_send - Send new email
-      tools.register({
-        name: "email_send",
-        description: "Send a new email via Gmail",
-        parametersSchema: {
-          type: "object",
-          properties: {
-            to: {
-              type: "string",
-              description: "Recipient email(s), comma-separated if multiple",
-            },
-            subject: {
-              type: "string",
-              description: "Email subject line",
-            },
-            body: {
-              type: "string",
-              description: "Email body (plain text)",
-            },
-          },
-          required: ["to", "subject", "body"],
-        },
-        permissions: [],
-        execute: async (params: any) => {
-          const recipients = params.to.split(",").map((s: string) => s.trim());
-          const result = await gmailClient.sendEmail({
-            to: recipients,
-            subject: params.subject,
-            body: params.body,
-          });
-          return {
-            success: true,
-            messageId: result.messageId,
-            message: `Email sent to ${recipients.join(", ")}`,
-          };
-        },
-      });
-
-      // email_reply - Reply to thread
-      tools.register({
-        name: "email_reply",
-        description: "Reply to an email thread",
-        parametersSchema: {
-          type: "object",
-          properties: {
-            threadId: {
-              type: "string",
-              description: "Email thread ID to reply to",
-            },
-            body: {
-              type: "string",
-              description: "Reply message body",
-            },
-          },
-          required: ["threadId", "body"],
-        },
-        permissions: [],
-        execute: async (params: any) => {
-          const result = await gmailClient.replyToEmail({
-            threadId: params.threadId,
-            body: params.body,
-          });
-          return {
-            success: true,
-            messageId: result.messageId,
-            message: `Reply sent to thread ${params.threadId}`,
-          };
-        },
-      });
-
-      // email_search - Search emails
-      tools.register({
-        name: "email_search",
-        description:
-          "Search Gmail with query syntax (e.g., 'from:john@example.com subject:meeting')",
-        parametersSchema: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string",
-              description:
-                "Gmail search query using Gmail syntax (same as search bar)",
-            },
-          },
-          required: ["query"],
-        },
-        permissions: [],
-        execute: async (params: any) => {
-          const messages = await gmailClient.search(params.query);
-          return {
-            count: messages.length,
-            messages: messages.map((m) => ({
-              id: m.id,
-              threadId: m.threadId,
-              from: m.from,
-              subject: m.subject,
-              snippet: m.snippet,
-              date: m.date.toISOString(),
-            })),
-          };
-        },
-      });
-
-      console.log("📧 Registered 4 Gmail email tools");
-    }
-
-    // Register research email tool
-    tools.register({
-      name: "research_email_send",
-      description: "Run web research and send summary email",
-      category: "communication",
-      keywords: ["research", "email", "send", "summary", "report"],
-      examples: [
-        "research latest stock prices and email me",
-        "research trending topics and send to my friend",
-      ],
-      parametersSchema: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "Research query to search for",
-          },
-          recipientEmail: {
-            type: "string",
-            description: "Email recipient for the research summary",
-          },
-          timeZone: {
-            type: "string",
-            description: "Optional IANA time zone (e.g., America/New_York)",
-          },
-          deliverySubject: {
-            type: "string",
-            description: "Optional email subject override",
-          },
-        },
-        required: ["query", "recipientEmail"],
-      },
-      permissions: [],
-      execute: async (params: any) => {
-        if (!gmailClient) {
-          return {
-            success: false,
-            error: "Email not configured. Run `nova config email-setup`.",
-          };
-        }
-
-        if (!params.recipientEmail && defaultNotificationEmail) {
-          params.recipientEmail = defaultNotificationEmail;
-        }
-
-        if (!params.recipientEmail) {
-          return {
-            success: false,
-            error: "recipientEmail is required for scheduled research emails",
-          };
-        }
-
-        const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-          String(params.recipientEmail),
-        );
-        if (!isValid) {
-          return {
-            success: false,
-            error: "Invalid recipientEmail format",
-          };
-        }
-
-        const results = (await tools.execute("search_web", {
-          query: params.query,
-        })) as {
-          results: Array<{ title: string; url: string; description: string }>;
-        };
-
-        const subject =
-          params.deliverySubject || `Research: ${String(params.query)}`;
-        const lines = [`Research results for: ${params.query}`, ""];
-        for (const result of results.results || []) {
-          lines.push(`- ${result.title}`);
-          lines.push(`  ${result.description}`);
-          lines.push(`  ${result.url}`);
-          lines.push("");
-        }
-        if (results.results.length === 0) {
-          lines.push("No results found.");
-        }
-
-        await gmailClient.sendEmail({
-          to: [String(params.recipientEmail)],
-          subject,
-          body: lines.join("\n"),
-        });
-
-        return {
-          success: true,
-          message: `Research email sent to ${params.recipientEmail}`,
-        };
-      },
-    });
-
     const runtimeInstance = new Runtime(
       executor,
       memory,
       security,
       tools,
       planner,
-
-      gmailClient,
+      memoryV2,
     );
 
     return runtimeInstance;
@@ -472,17 +231,116 @@ export class Runtime {
   }
 
   /**
+   * Get memory v2 store (nullable when disabled)
+   */
+  getMemoryV2(): MemoryV2 | null {
+    return this.memoryV2;
+  }
+
+  /**
+   * Enqueue a memory-v2 learning job.
+   */
+  enqueueLearningJob(input: {
+    userId: string;
+    conversationId: string;
+    type:
+      | "post_turn_extract"
+      | "post_turn_reflect"
+      | "hourly_sweep"
+      | "self_audit"
+      | "conversation_analysis"
+      | "self_discovery";
+    payload?: Record<string, unknown>;
+    maxAttempts?: number;
+    runAfter?: number;
+  }): string {
+    if (!this.memoryV2) {
+      throw new Error("Memory V2 is disabled");
+    }
+    return this.memoryV2.enqueueLearningJob(input);
+  }
+
+  /**
+   * Process pending memory-v2 learning jobs.
+   */
+  async processPendingLearningJobs(input: {
+    limit?: number;
+    handler: (job: LearningJob) => Promise<void>;
+  }): Promise<{ processed: number; failed: number }> {
+    if (!this.memoryV2) {
+      return { processed: 0, failed: 0 };
+    }
+    return await this.memoryV2.processPendingLearningJobs(input);
+  }
+
+  /**
+   * Evaluate autonomous actions/check-ins for a user.
+   */
+  evaluateAutonomousActions(input: {
+    userId: string;
+    channels?: ChannelType[];
+  }): AutonomyEvaluationResult {
+    if (!this.memoryV2) {
+      return {
+        userId: input.userId,
+        checkedAt: Date.now(),
+        shouldSendProactive: false,
+        reason: "memory_v2_disabled",
+        createdEventIds: [],
+      };
+    }
+    return this.memoryV2.evaluateAutonomousActions(input);
+  }
+
+  listApprovalRequests(input: {
+    userId?: string;
+    status?: ApprovalRequest["status"];
+    limit?: number;
+  }): ApprovalRequest[] {
+    if (!this.memoryV2) return [];
+    return this.memoryV2.listApprovalRequests(input);
+  }
+
+  approveApprovalRequest(input: {
+    requestId: string;
+    userId?: string;
+  }): { id: string; token: string; expiresAt: number } | null {
+    if (!this.memoryV2) return null;
+    return this.memoryV2.approveApprovalRequest(input);
+  }
+
+  rejectApprovalRequest(input: {
+    requestId: string;
+    userId?: string;
+    reason?: string;
+  }): boolean {
+    if (!this.memoryV2) return false;
+    return this.memoryV2.rejectApprovalRequest(input);
+  }
+
+  /**
+   * List pending proactive events queued by autonomy engine.
+   */
+  listPendingProactiveEvents(limit = 20): ProactiveEvent[] {
+    if (!this.memoryV2) return [];
+    return this.memoryV2.listPendingProactiveEvents(limit);
+  }
+
+  markProactiveSent(eventId: string): void {
+    if (!this.memoryV2) return;
+    this.memoryV2.markProactiveSent(eventId);
+  }
+
+  markProactiveDropped(eventId: string, reason: string): void {
+    if (!this.memoryV2) return;
+    this.memoryV2.markProactiveDropped(eventId, reason);
+  }
+
+  /**
    * Get tool registry
    */
   getTools(): ToolRegistry {
     return this.tools;
-  }
-
-  /**
-   * Get Gmail client
-   */
-  getGmailClient(): GmailClient | null {
-    return this.gmailClient;
   }
 
   /**
@@ -491,8 +349,52 @@ export class Runtime {
   async executeTool(
     name: string,
     params: Record<string, unknown>,
+    context?: ToolExecutionContext,
   ): Promise<unknown> {
-    return await this.tools.execute(name, params);
+    this.enforceAutonomousApproval(name, params, context);
+    return await this.tools.execute(name, params, context);
+  }
+
+  private enforceAutonomousApproval(
+    name: string,
+    params: Record<string, unknown>,
+    context?: ToolExecutionContext,
+  ): void {
+    if (!this.memoryV2) return;
+    if (context?.autonomousExecution !== true) return;
+    if (!this.memoryV2.requiresApproval(name)) return;
+
+    const userId = String(context.userId || "owner").trim() || "owner";
+    const approvalToken = String(context.approvalToken || "").trim();
+    const requestId = String(context.approvalRequestId || "").trim();
+
+    if (approvalToken) {
+      const consumed = this.memoryV2.consumeApprovalToken({
+        userId,
+        actionType: name,
+        token: approvalToken,
+        requestId: requestId || undefined,
+      });
+      if (consumed.approved) {
+        return;
+      }
+    }
+
+    const created = this.memoryV2.createApprovalRequest({
+      userId,
+      actionType: name,
+      actionPayload: params,
+      reason: `Autonomous execution requested approval for tool '${name}'.`,
+    });
+
+    const detail = {
+      requestId: created.id,
+      actionType: name,
+      reason: "high_impact_action_requires_approval",
+      expiresAt: created.expiresAt,
+      approvalCommand: `/memory approval approve ${created.id}`,
+    };
+    throw new Error(`APPROVAL_REQUIRED:${JSON.stringify(detail)}`);
   }
 
   /**
@@ -517,10 +419,11 @@ export class Runtime {
     task: string,
     config?: { sessionId?: string; maxIterations?: number },
   ) {
-    return await this.executor.execute(config?.sessionId || "default", {
-      task,
-      maxIterations: config?.maxIterations || 10,
-    });
+    const executionPlan = {
+      taskId: config?.sessionId || `task-${Date.now()}`,
+      steps: [],
+    };
+    return await this.executor.execute(executionPlan, this.tools);
   }
 
   /**
@@ -528,6 +431,8 @@ export class Runtime {
    */
   async shutdown(): Promise<void> {
     await this.executor.shutdown();
+    await this.tools.shutdown();
+    this.memoryV2?.close();
     this.memory.close();
   }
 }
@@ -535,6 +440,7 @@ export class Runtime {
 // Re-export types
 export * from "./executor";
 export * from "./memory";
+export * from "./memory-v2";
 export * from "./security";
 export * from "./tools";
 export * from "./planner";

@@ -118,20 +118,20 @@ export class Agent {
       messages.find((m) => m.role === "system")?.content || this.systemPrompt;
     const userMessages = messages.filter((m) => m.role !== "system");
 
-    const response = await this.anthropicClient.messages.create({
+    const response = (await (this.anthropicClient.messages.create as any)({
       model: this.config.model || "claude-3-5-sonnet-20241022",
       max_tokens: this.config.maxTokens || 4096,
       temperature: this.config.temperature || 0.7,
       system: systemMessage,
       messages: userMessages as any,
       tools: anthropicTools as any,
-    });
+    })) as any;
 
     // Extract tool calls
     const toolCalls: ToolCall[] = [];
     let textContent = "";
 
-    for (const block of response.content) {
+    for (const block of response.content as any[]) {
       if (block.type === "text") {
         textContent += block.text;
       } else if (block.type === "tool_use") {
@@ -252,6 +252,73 @@ export class Agent {
     }
 
     throw new Error("Provider not supported");
+  }
+
+  /**
+   * Vision analysis — sends an image to the LLM for visual understanding.
+   * Used by the browse tool's vision sub-agent to analyze screenshots.
+   * Returns a text description of what the LLM sees in the image.
+   */
+  async chatWithVision(imageBase64: string, prompt: string): Promise<string> {
+    if (this.config.provider === "anthropic" && this.anthropicClient) {
+      const response = await this.anthropicClient.messages.create({
+        model: this.config.model || "claude-3-5-sonnet-20241022",
+        max_tokens: this.config.maxTokens || 2048,
+        temperature: 0.3,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: "image/png",
+                  data: imageBase64,
+                },
+              },
+              {
+                type: "text",
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      });
+
+      return response.content[0].type === "text"
+        ? response.content[0].text
+        : "";
+    }
+
+    if (this.config.provider === "openai" && this.openaiClient) {
+      const response = await this.openaiClient.chat.completions.create({
+        model: this.config.model || "gpt-4o-mini",
+        temperature: 0.3,
+        max_tokens: this.config.maxTokens || 2048,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/png;base64,${imageBase64}`,
+                },
+              },
+              {
+                type: "text",
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      });
+
+      return response.choices[0]?.message?.content || "";
+    }
+
+    throw new Error("Provider not supported for vision");
   }
 
   /**

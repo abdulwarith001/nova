@@ -183,6 +183,19 @@ export interface OODAState {
   act: ActionResult;
 }
 
+export interface OODAThought {
+  phase: "observe" | "orient" | "decide" | "act";
+  content: string;
+  confidence: number;
+  timestamp: number;
+}
+
+export interface OODARunResult {
+  thoughts: OODAThought[];
+  decision: DecisionResult;
+  assembledThinking: string;
+}
+
 export interface ReasoningEngineConfig {
   mode?: "off" | "fast" | "full";
   verbosity?: "none" | "summary";

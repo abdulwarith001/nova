@@ -1,6 +1,10 @@
 import { Agent, type Message } from "../../agent/src/index.js";
 import { Runtime } from "../../runtime/src/index.js";
 import {
+  ReasoningEngine,
+  toReasoningTools,
+} from "../../agent/src/reasoning/index.js";
+import {
   trimConversationHistory,
   truncateToolContent,
   type ChatHistoryMessage,
@@ -20,7 +24,12 @@ export interface ResearchContract {
 }
 
 export interface ResearchEvent {
-  type: "tool_start" | "tool_complete" | "synthesis_start" | "finalized";
+  type:
+    | "tool_start"
+    | "tool_complete"
+    | "synthesis_start"
+    | "reasoning"
+    | "finalized";
   timestamp: number;
   details?: Record<string, unknown>;
 }
@@ -65,15 +74,18 @@ type ToolExecutionResult = {
   error?: string;
 };
 
-const DEFAULT_ERROR_RESPONSE =
-  "I'm sorry, I couldn't complete that request.";
+const DEFAULT_ERROR_RESPONSE = "I'm sorry, I couldn't complete that request.";
 
 export class ResearchOrchestrator {
+  private readonly reasoningEngine: ReasoningEngine;
+
   constructor(
     private readonly runtime: Runtime,
     private readonly agent: Agent,
     private readonly config: ResearchOrchestratorConfig,
-  ) {}
+  ) {
+    this.reasoningEngine = new ReasoningEngine(agent, { mode: "full" });
+  }
 
   async runChatTurn(input: ResearchTurnInput): Promise<ResearchTurnResult> {
     const startedAt = performance.now();
@@ -114,12 +126,47 @@ export class ResearchOrchestrator {
       24,
     );
 
+    // Run OODA reasoning loop — logs traces to ~/.nova/reasoning.log
+    try {
+      const memoryContext = await this.getMemoryContext(memory, input.message);
+      const oodaResult = await this.reasoningEngine.runOODA({
+        message: input.message,
+        memoryContext,
+        conversationHistory: modelHistory.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      });
+      this.pushEvent(events, "reasoning", {
+        assembledThinking: oodaResult.assembledThinking,
+        confidence: oodaResult.decision.confidence,
+        thoughtCount: oodaResult.thoughts.length,
+      });
+      // Inject reasoning context into model history so the LLM benefits
+      if (oodaResult.assembledThinking) {
+        modelHistory = [
+          ...modelHistory.slice(0, -1),
+          {
+            role: "system",
+            content: `[Internal reasoning]\n${oodaResult.assembledThinking}`,
+          },
+          modelHistory[modelHistory.length - 1],
+        ];
+      }
+    } catch (reasoningError) {
+      console.warn("⚠️ OODA reasoning failed (non-fatal):", reasoningError);
+    }
+
     let finalText = "";
     let fallbackReason: string | undefined;
     let usedWebTool = false;
     const toolResults: ToolExecutionResult[] = [];
 
-    for (let iteration = 0; iteration < this.config.maxIterations; iteration++) {
+    for (
+      let iteration = 0;
+      iteration < this.config.maxIterations;
+      iteration++
+    ) {
       metrics.iteration_count = iteration + 1;
       this.pushEvent(events, "synthesis_start", { iteration: iteration + 1 });
 
@@ -330,6 +377,21 @@ export class ResearchOrchestrator {
     };
   }
 
+  private async getMemoryContext(
+    memory: ReturnType<Runtime["getMemory"]>,
+    message: string,
+  ): Promise<string | undefined> {
+    try {
+      const results = await memory.search(message, { limit: 3 });
+      if (results.length === 0) return undefined;
+      return results
+        .map((r) => `[${r.category || "memory"}] ${r.content}`)
+        .join("\n");
+    } catch {
+      return undefined;
+    }
+  }
+
   private pushEvent(
     events: ResearchEvent[],
     type: ResearchEvent["type"],
@@ -408,7 +470,9 @@ export class ResearchOrchestrator {
     }
 
     const candidate = parsed as any;
-    const answer = String(candidate.answer || raw || DEFAULT_ERROR_RESPONSE).trim();
+    const answer = String(
+      candidate.answer || raw || DEFAULT_ERROR_RESPONSE,
+    ).trim();
     const sources = normalizeSources(candidate.sources, this.config.maxSources);
     const uncertainty =
       typeof candidate.uncertainty === "string" && candidate.uncertainty.trim()
@@ -416,7 +480,10 @@ export class ResearchOrchestrator {
         : sources.length > 0
           ? "Based on the cited sources; details may change over time."
           : "Limited evidence available.";
-    const confidence = clampNumber(candidate.confidence, sources.length > 0 ? 0.7 : 0.4);
+    const confidence = clampNumber(
+      candidate.confidence,
+      sources.length > 0 ? 0.7 : 0.4,
+    );
 
     return {
       answer,
@@ -470,13 +537,16 @@ function extractSourcesFromToolResults(
         sources.push({
           title: String(result?.title || url),
           url,
-          whyRelevant: String(result?.description || `Found via ${item.toolName}`),
+          whyRelevant: String(
+            result?.description || `Found via ${item.toolName}`,
+          ),
         });
         if (sources.length >= maxSources) return sources;
       }
     }
 
-    const fetchUrl = typeof resultObj.finalUrl === "string" ? resultObj.finalUrl : "";
+    const fetchUrl =
+      typeof resultObj.finalUrl === "string" ? resultObj.finalUrl : "";
     if (/^https?:\/\//i.test(fetchUrl) && !dedupe.has(fetchUrl)) {
       dedupe.add(fetchUrl);
       sources.push({

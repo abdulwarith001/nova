@@ -3,13 +3,15 @@ import { Agent } from "../index.js";
 import { ChainOfThought } from "./chain-of-thought.js";
 import { ReasoningLogger } from "./logger.js";
 import { REASONING_PROMPTS } from "./prompts.js";
-import { observe, orient } from "./ooda-loop.js";
+import { runOODALoop } from "./ooda-loop.js";
 import {
   ActionResult,
   AgentEvent,
   AgentEventHandler,
   DecisionResult,
   OODAState,
+  OODAThought,
+  OODARunResult,
   ObservationResult,
   OrientationResult,
   ReasoningContext,
@@ -173,14 +175,38 @@ export class ReasoningEngine {
   }
 
   async observe(context: ReasoningContext): Promise<ObservationResult> {
-    return observe({
-      ...context,
-      maxTools: context.maxTools ?? this.config.maxTools,
-    });
+    return {
+      task: context.task,
+      memoryContext: context.memoryContext,
+      availableTools: context.tools,
+      constraints: { maxTools: context.maxTools ?? this.config.maxTools ?? 20 },
+      notes: [
+        context.memoryContext
+          ? "Memory context available"
+          : "No memory context",
+        `Available tools: ${context.tools.length}`,
+      ],
+    };
   }
 
   async orient(observation: ObservationResult): Promise<OrientationResult> {
-    return orient(observation, this.toolSelector);
+    const scored = this.toolSelector.scoreTools(
+      observation.task,
+      observation.availableTools as any,
+    );
+    const candidates = scored.map((entry: any) => ({
+      tool: entry.tool as any,
+      score: entry.score,
+      rationale: entry.score > 0 ? "keyword match" : "low match",
+    }));
+    const confidence =
+      candidates.length > 0 ? Math.min(1, candidates[0].score / 10) : 0.2;
+    return {
+      intent: observation.task,
+      candidates,
+      confidence,
+      risks: candidates.length === 0 ? ["No obvious tool matches found"] : [],
+    };
   }
 
   async decide(
@@ -315,6 +341,127 @@ export class ReasoningEngine {
 
   getLogger(): ReasoningLogger {
     return this.logger;
+  }
+
+  /**
+   * Run the full OODA loop for a chat message.
+   * Each phase (observe → orient → decide) produces a thought that is
+   * passed to the next phase. Returns all thoughts and assembled thinking.
+   */
+  async runOODA(input: {
+    message: string;
+    memoryContext?: string;
+    conversationHistory?: Array<{ role: string; content: string }>;
+  }): Promise<OODARunResult> {
+    if (!this.llmChat) {
+      // No LLM available — return a minimal fallback
+      const fallbackThought: OODAThought = {
+        phase: "observe",
+        content: `Message received: ${input.message.slice(0, 100)}`,
+        confidence: 0.5,
+        timestamp: Date.now(),
+      };
+      return {
+        thoughts: [fallbackThought],
+        decision: {
+          selectedTools: [],
+          rationale: "No reasoning LLM available.",
+          fallback: "Respond directly.",
+          confidence: 0.5,
+        },
+        assembledThinking: `[OBSERVE] ${fallbackThought.content}`,
+      };
+    }
+
+    this.emit({ type: "thinking_start", task: input.message, iteration: 1 });
+
+    const result = await runOODALoop({
+      message: input.message,
+      memoryContext: input.memoryContext,
+      conversationHistory: input.conversationHistory,
+      llmChat: this.llmChat,
+    });
+
+    // Emit each thought as a thinking step event
+    for (const thought of result.thoughts) {
+      this.emit({
+        type: "thinking_step",
+        step: {
+          type:
+            thought.phase === "observe"
+              ? "observation"
+              : thought.phase === "orient"
+                ? "hypothesis"
+                : "conclusion",
+          content: `[${thought.phase.toUpperCase()}] ${thought.content}`,
+          confidence: thought.confidence,
+          timestamp: thought.timestamp,
+        },
+        iteration: 1,
+      });
+    }
+
+    // Log the full OODA trace
+    this.logger.logThinking(input.message, {
+      thinking: result.assembledThinking,
+      response: "",
+      steps: result.thoughts.map((t) => ({
+        type:
+          t.phase === "observe"
+            ? ("observation" as const)
+            : t.phase === "orient"
+              ? ("hypothesis" as const)
+              : ("conclusion" as const),
+        content: t.content,
+        confidence: t.confidence,
+        timestamp: t.timestamp,
+      })),
+      confidence:
+        result.thoughts.length > 0
+          ? result.thoughts.reduce((sum, t) => sum + t.confidence, 0) /
+            result.thoughts.length
+          : 0.5,
+    });
+
+    this.emit({
+      type: "thinking_complete",
+      result: {
+        thinking: result.assembledThinking,
+        response: "",
+        steps: result.thoughts.map((t) => ({
+          type:
+            t.phase === "observe"
+              ? ("observation" as const)
+              : t.phase === "orient"
+                ? ("hypothesis" as const)
+                : ("conclusion" as const),
+          content: t.content,
+          confidence: t.confidence,
+          timestamp: t.timestamp,
+        })),
+        confidence:
+          result.thoughts.length > 0
+            ? result.thoughts.reduce((sum, t) => sum + t.confidence, 0) /
+              result.thoughts.length
+            : 0.5,
+      },
+      iteration: 1,
+    });
+
+    return {
+      thoughts: result.thoughts,
+      decision: {
+        selectedTools: [],
+        rationale: result.assembledThinking,
+        fallback: "Respond directly.",
+        confidence:
+          result.thoughts.length > 0
+            ? result.thoughts.reduce((sum, t) => sum + t.confidence, 0) /
+              result.thoughts.length
+            : 0.5,
+      },
+      assembledThinking: result.assembledThinking,
+    };
   }
 }
 

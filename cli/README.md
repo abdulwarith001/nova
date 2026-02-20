@@ -103,8 +103,15 @@ nova jobs --cancel <id>      # Cancel by ID
 Memory management:
 
 ```bash
-nova memory search "query"   # Search memories
-nova memory clear            # Clear all memories
+nova memory status                             # Memory counters
+nova memory user                               # User traits/relationships/memories
+nova memory agent                              # Agent identity/self-memory
+nova memory list memories owner 25             # List entities with limit
+nova memory search "working late reminders"    # Search across memory
+nova memory delete memory mem-123              # Delete one memory item
+nova memory forget traits                      # Delete one scope
+nova memory forget all confirm                 # Delete all user memory
+nova memory export owner ~/Downloads/mem.json  # Export memory JSON
 ```
 
 ### `nova config`
