@@ -10,7 +10,7 @@ import { runCommand } from "./commands/run.js";
 import { telegramCommand } from "./commands/telegram.js";
 import { braveCommand } from "./commands/brave.js";
 import { googleCommand } from "./commands/google.js";
-import { whatsappCommand } from "./commands/whatsapp.js";
+
 import { webAgentCommand } from "./commands/web-agent.js";
 
 program
@@ -74,13 +74,6 @@ program
   });
 
 program
-  .command("whatsapp [action]")
-  .description("Manage WhatsApp connection (setup|status|disable)")
-  .action(async (action?: string) => {
-    return whatsappCommand(action);
-  });
-
-program
   .command("web [action] [arg1] [arg2]")
   .description("Web-agent utilities (bootstrap|approve)")
   .option("--start-url <url>", "Optional URL for profile bootstrap")
@@ -130,6 +123,22 @@ program
   .action(async (options) => {
     const { reasoningCommand } = await import("./commands/reasoning.js");
     return reasoningCommand(options);
+  });
+
+program
+  .command("soul [action]")
+  .description("Manage agent personality (edit|show|reset)")
+  .action(async (action?: string) => {
+    const { soulCommand } = await import("./commands/soul.js");
+    return soulCommand(action);
+  });
+
+program
+  .command("skill [action]")
+  .description("Manage agent skills (list)")
+  .action(async (action?: string) => {
+    const { skillCommand } = await import("./commands/skill.js");
+    return skillCommand(action);
   });
 
 // Parse arguments

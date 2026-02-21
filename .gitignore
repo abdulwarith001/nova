@@ -49,6 +49,4 @@ coverage/
 yarn.lock
 pnpm-lock.yaml
 
-# Ignore WhatsApp Web JS runtime files
-.wwebjs_cache/
-.wwebjs_auth/
+

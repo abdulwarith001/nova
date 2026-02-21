@@ -14,15 +14,14 @@ export interface ChatServiceConfig {
   enableTelemetry: boolean;
   shadowMode: boolean;
   historyLimit?: number;
+  soulContent?: string;
 }
 
 export interface ChatTurnInput {
   message: string;
   sessionId: string;
   historyKey: string;
-  channel: "ws" | "telegram" | "whatsapp";
-  /** Optional context about the sender — identity, role, instructions for the agent. Only used by WhatsApp channel. */
-  senderContext?: string;
+  channel: "ws" | "telegram";
 }
 
 export interface ChatTurnOutput {
@@ -59,25 +58,6 @@ export class ChatService {
     }
 
     const history = this.getOrCreateHistory(input.historyKey, input.channel);
-
-    // Inject per-message sender context (e.g. WhatsApp identity info)
-    if (input.senderContext) {
-      const contextContent = `[SENDER CONTEXT] ${input.senderContext}`;
-      const existingIdx = history.findIndex(
-        (m) => m.role === "system" && m.content.startsWith("[SENDER CONTEXT]"),
-      );
-      if (existingIdx >= 0) {
-        history[existingIdx] = { role: "system", content: contextContent };
-      } else {
-        // Insert after the initial system message
-        const insertAt =
-          history.length > 0 && history[0].role === "system" ? 1 : 0;
-        history.splice(insertAt, 0, {
-          role: "system",
-          content: contextContent,
-        });
-      }
-    }
 
     if (this.config.useResearchOrchestratorV2) {
       const result = await this.orchestrator.runChatTurn({
@@ -163,29 +143,17 @@ export class ChatService {
     const now = new Date();
     const timestamp = `Current date and time: ${now.toISOString()}.`;
 
-    if (channel === "whatsapp") {
-      return [
-        timestamp,
-        "",
-        "You are Nova, a personal AI assistant communicating via WhatsApp.",
-        "",
-        "Behavior:",
-        "- Be warm, conversational, and concise — this is a chat, not an email.",
-        "- Be proactive: suggest useful actions, don't just wait to be asked.",
-        "- Reference past conversations and memories when relevant.",
-        "- If you have access to tools (calendar, email, search), offer to use them.",
-        "",
-        "Formatting rules (WhatsApp-native):",
-        "- Use *bold* for emphasis (NOT **bold**).",
-        "- Use _italics_ for subtle emphasis.",
-        "- Use bullet points with • or -.",
-        "- NEVER use markdown headers (#), tables, or code blocks — they render as plain text on WhatsApp.",
-        "- Use emojis naturally but sparingly.",
-        "- Keep responses under 200 words unless asked for detail.",
-      ].join("\n");
+    // Use soul.md content if available, otherwise fall back to a minimal prompt
+    if (this.config.soulContent) {
+      return [timestamp, "", this.config.soulContent].join("\n");
     }
 
-    return `${timestamp} Use this as the reference for any time-related queries.`;
+    return [
+      timestamp,
+      "",
+      "You are Nova, a personal AI assistant.",
+      "Be warm, direct, and genuinely helpful.",
+    ].join("\n");
   }
 
   private toSimpleHistory(history: ChatHistoryMessage[]): Message[] {

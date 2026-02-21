@@ -65,7 +65,7 @@ export interface ResearchOrchestratorConfig {
   toolTimeoutMs: number;
   maxSources: number;
   enableTelemetry: boolean;
-  provider: "openai" | "anthropic" | "google";
+  provider: "openai" | "anthropic";
 }
 
 type ToolExecutionResult = {
@@ -100,25 +100,23 @@ export class ResearchOrchestrator {
       time_total_ms: 0,
     };
 
-    const memory = this.runtime.getMemory();
-    const queueMemoryStore = (entry: Parameters<typeof memory.store>[0]) => {
-      void memory.store(entry).catch((error) => {
-        console.error("⚠️ Memory store failed:", error);
-      });
-    };
+    const mdMemory = this.runtime.getMarkdownMemory();
+    const convStore = mdMemory.getConversationStore();
+    const userId = input.sessionId || `session-${Date.now()}`;
+    const conversationId = userId;
 
-    queueMemoryStore({
-      id: `msg-${Date.now()}-user`,
-      content: input.message,
-      timestamp: Date.now(),
-      importance: 0.6,
-      decayRate: 0.1,
-      tags: ["chat", "user-message"],
-      source: "chat",
-      category: "conversation",
-      sessionId: input.sessionId,
-      metadata: { role: "user" },
-    });
+    // Store user message in conversation log
+    try {
+      convStore.addMessage({
+        userId,
+        conversationId,
+        role: "user",
+        content: input.message,
+        channel: (input as any).channel || "ws",
+      });
+    } catch (err: any) {
+      console.error("⚠️ Conversation store failed:", err?.message);
+    }
 
     const tools = this.runtime.getToolsForAgent();
     let modelHistory = trimConversationHistory(
@@ -128,7 +126,7 @@ export class ResearchOrchestrator {
 
     // Run OODA reasoning loop — logs traces to ~/.nova/reasoning.log
     try {
-      const memoryContext = await this.getMemoryContext(memory, input.message);
+      const memoryContext = this.getMemoryContext(input.message);
       const oodaResult = await this.reasoningEngine.runOODA({
         message: input.message,
         memoryContext,
@@ -217,22 +215,15 @@ export class ResearchOrchestrator {
             metrics.time_tools_ms += performance.now() - toolStart;
             toolResults.push({ toolName, result });
 
-            queueMemoryStore({
-              id: `tool-${Date.now()}-${toolName}`,
-              content: `Successfully used ${toolName} tool`,
-              timestamp: Date.now(),
-              importance: 0.7,
-              decayRate: 0.15,
-              tags: ["tool-usage", toolName],
-              source: "chat",
-              category: "self",
-              sessionId: input.sessionId,
-              metadata: {
-                tool: toolName,
-                params: toolCall.parameters,
-                success: true,
-              },
-            });
+            try {
+              convStore.addMessage({
+                userId,
+                conversationId,
+                role: "assistant",
+                content: `[tool: ${toolName}] success`,
+                channel: (input as any).channel || "ws",
+              });
+            } catch {}
 
             if (this.config.provider === "openai" && toolCall.id) {
               modelHistory.push({
@@ -335,22 +326,18 @@ export class ResearchOrchestrator {
       12,
     );
 
-    queueMemoryStore({
-      id: `msg-${Date.now()}-assistant`,
-      content: responseText,
-      timestamp: Date.now(),
-      importance: 0.6,
-      decayRate: 0.1,
-      tags: ["chat", "agent-response"],
-      source: "chat",
-      category: "conversation",
-      sessionId: input.sessionId,
-      metadata: {
+    // Store assistant response in conversation log
+    try {
+      convStore.addMessage({
+        userId,
+        conversationId,
         role: "assistant",
-        sources: research.sources.length,
-        confidence: research.confidence,
-      },
-    });
+        content: responseText,
+        channel: (input as any).channel || "ws",
+      });
+    } catch (err: any) {
+      console.error("⚠️ Conversation store failed:", err?.message);
+    }
 
     metrics.time_total_ms = performance.now() - startedAt;
     metrics.fallback_reason = fallbackReason;
@@ -377,16 +364,17 @@ export class ResearchOrchestrator {
     };
   }
 
-  private async getMemoryContext(
-    memory: ReturnType<Runtime["getMemory"]>,
-    message: string,
-  ): Promise<string | undefined> {
+  private getMemoryContext(message: string): string | undefined {
     try {
-      const results = await memory.search(message, { limit: 3 });
-      if (results.length === 0) return undefined;
-      return results
-        .map((r) => `[${r.category || "memory"}] ${r.content}`)
-        .join("\n");
+      const mdMemory = this.runtime.getMarkdownMemory();
+      const contextPkg = mdMemory.getContextAssembler().buildContext({
+        userId: "owner",
+        conversationId: "current",
+        memoryLimit: 8,
+        traitLimit: 20,
+      });
+      const prompt = contextPkg.assembledSystemPrompt;
+      return prompt && prompt.trim().length > 0 ? prompt : undefined;
     } catch {
       return undefined;
     }

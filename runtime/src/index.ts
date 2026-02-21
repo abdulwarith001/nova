@@ -1,50 +1,27 @@
 import { Executor, ExecutorConfig } from "./executor";
 import { MemoryStore } from "./memory";
 import {
-  type ApprovalRequest,
-  MemoryV2,
-  type AutonomyEvaluationResult,
+  MarkdownMemory,
   type ChannelType,
   type LearningJob,
-  type ProactiveEvent,
-} from "./memory-v2";
+  type MemoryJobType,
+} from "./markdown-memory/index";
 import { SecurityManager, SecurityConfig } from "./security";
 import { ToolExecutionContext, ToolRegistry } from "./tools";
 import { Planner } from "./planner";
-
-import { config } from "dotenv";
-import { homedir } from "os";
+import { ensureEnvLoaded } from "./config";
 import { join } from "path";
-import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
 
-// Load environment variables
-config({ path: join(homedir(), ".nova", ".env") });
-
-// Default to Lagos time if not explicitly set
-if (!process.env.TZ) {
-  process.env.TZ = "Africa/Lagos";
-}
-
-function loadRuntimeConfig(): { notificationEmail?: string } {
-  const configPath = join(homedir(), ".nova", "config.json");
-  if (!existsSync(configPath)) return {};
-
-  try {
-    const configJson = JSON.parse(readFileSync(configPath, "utf-8"));
-    return { notificationEmail: configJson.notificationEmail };
-  } catch {
-    return {};
-  }
-}
+ensureEnvLoaded();
 
 export interface RuntimeConfig {
   memoryPath: string;
-  memoryV2Path?: string;
-  enableMemoryV2?: boolean;
+  novaDir?: string;
   security: SecurityConfig;
   executor: ExecutorConfig;
   agent: {
-    provider: "openai" | "anthropic" | "google";
+    provider: "openai" | "anthropic";
     model: string;
     apiKey?: string;
   };
@@ -77,7 +54,7 @@ export class Runtime {
   private security: SecurityManager;
   private tools: ToolRegistry;
   private planner: Planner;
-  private memoryV2: MemoryV2 | null;
+  private markdownMemory: MarkdownMemory;
 
   private constructor(
     executor: Executor,
@@ -85,14 +62,14 @@ export class Runtime {
     security: SecurityManager,
     tools: ToolRegistry,
     planner: Planner,
-    memoryV2: MemoryV2 | null,
+    markdownMemory: MarkdownMemory,
   ) {
     this.executor = executor;
     this.memory = memory;
     this.security = security;
     this.tools = tools;
     this.planner = planner;
-    this.memoryV2 = memoryV2;
+    this.markdownMemory = markdownMemory;
   }
 
   /**
@@ -100,15 +77,8 @@ export class Runtime {
    */
   static async create(config: RuntimeConfig): Promise<Runtime> {
     const memory = await MemoryStore.create(config.memoryPath);
-    const memoryV2 =
-      config.enableMemoryV2 === true
-        ? await MemoryV2.create(
-            config.memoryV2Path ||
-              (config.memoryPath === ":memory:"
-                ? ":memory:"
-                : config.memoryPath.replace(/memory(\.db)?$/, "memory-v2.db")),
-          )
-        : null;
+    const novaDir = config.novaDir || join(homedir(), ".nova");
+    const markdownMemory = MarkdownMemory.create(join(novaDir, "memory"));
     const security = new SecurityManager(config.security);
     const tools = new ToolRegistry();
     const executor = new Executor(config.executor);
@@ -189,7 +159,7 @@ export class Runtime {
       security,
       tools,
       planner,
-      memoryV2,
+      markdownMemory,
     );
 
     return runtimeInstance;
@@ -223,117 +193,39 @@ export class Runtime {
     };
   }
 
-  /**
-   * Get memory store
-   */
   getMemory(): MemoryStore {
     return this.memory;
   }
 
   /**
-   * Get memory v2 store (nullable when disabled)
+   * Get the Markdown-based memory system.
    */
-  getMemoryV2(): MemoryV2 | null {
-    return this.memoryV2;
+  getMarkdownMemory(): MarkdownMemory {
+    return this.markdownMemory;
   }
 
   /**
-   * Enqueue a memory-v2 learning job.
+   * Enqueue a learning job.
    */
   enqueueLearningJob(input: {
     userId: string;
     conversationId: string;
-    type:
-      | "post_turn_extract"
-      | "post_turn_reflect"
-      | "hourly_sweep"
-      | "self_audit"
-      | "conversation_analysis"
-      | "self_discovery";
+    type: MemoryJobType;
     payload?: Record<string, unknown>;
     maxAttempts?: number;
     runAfter?: number;
   }): string {
-    if (!this.memoryV2) {
-      throw new Error("Memory V2 is disabled");
-    }
-    return this.memoryV2.enqueueLearningJob(input);
+    return this.markdownMemory.enqueueLearningJob(input);
   }
 
   /**
-   * Process pending memory-v2 learning jobs.
+   * Process pending learning jobs.
    */
   async processPendingLearningJobs(input: {
     limit?: number;
     handler: (job: LearningJob) => Promise<void>;
   }): Promise<{ processed: number; failed: number }> {
-    if (!this.memoryV2) {
-      return { processed: 0, failed: 0 };
-    }
-    return await this.memoryV2.processPendingLearningJobs(input);
-  }
-
-  /**
-   * Evaluate autonomous actions/check-ins for a user.
-   */
-  evaluateAutonomousActions(input: {
-    userId: string;
-    channels?: ChannelType[];
-  }): AutonomyEvaluationResult {
-    if (!this.memoryV2) {
-      return {
-        userId: input.userId,
-        checkedAt: Date.now(),
-        shouldSendProactive: false,
-        reason: "memory_v2_disabled",
-        createdEventIds: [],
-      };
-    }
-    return this.memoryV2.evaluateAutonomousActions(input);
-  }
-
-  listApprovalRequests(input: {
-    userId?: string;
-    status?: ApprovalRequest["status"];
-    limit?: number;
-  }): ApprovalRequest[] {
-    if (!this.memoryV2) return [];
-    return this.memoryV2.listApprovalRequests(input);
-  }
-
-  approveApprovalRequest(input: {
-    requestId: string;
-    userId?: string;
-  }): { id: string; token: string; expiresAt: number } | null {
-    if (!this.memoryV2) return null;
-    return this.memoryV2.approveApprovalRequest(input);
-  }
-
-  rejectApprovalRequest(input: {
-    requestId: string;
-    userId?: string;
-    reason?: string;
-  }): boolean {
-    if (!this.memoryV2) return false;
-    return this.memoryV2.rejectApprovalRequest(input);
-  }
-
-  /**
-   * List pending proactive events queued by autonomy engine.
-   */
-  listPendingProactiveEvents(limit = 20): ProactiveEvent[] {
-    if (!this.memoryV2) return [];
-    return this.memoryV2.listPendingProactiveEvents(limit);
-  }
-
-  markProactiveSent(eventId: string): void {
-    if (!this.memoryV2) return;
-    this.memoryV2.markProactiveSent(eventId);
-  }
-
-  markProactiveDropped(eventId: string, reason: string): void {
-    if (!this.memoryV2) return;
-    this.memoryV2.markProactiveDropped(eventId, reason);
+    return await this.markdownMemory.processPendingLearningJobs(input);
   }
 
   /**
@@ -351,50 +243,7 @@ export class Runtime {
     params: Record<string, unknown>,
     context?: ToolExecutionContext,
   ): Promise<unknown> {
-    this.enforceAutonomousApproval(name, params, context);
     return await this.tools.execute(name, params, context);
-  }
-
-  private enforceAutonomousApproval(
-    name: string,
-    params: Record<string, unknown>,
-    context?: ToolExecutionContext,
-  ): void {
-    if (!this.memoryV2) return;
-    if (context?.autonomousExecution !== true) return;
-    if (!this.memoryV2.requiresApproval(name)) return;
-
-    const userId = String(context.userId || "owner").trim() || "owner";
-    const approvalToken = String(context.approvalToken || "").trim();
-    const requestId = String(context.approvalRequestId || "").trim();
-
-    if (approvalToken) {
-      const consumed = this.memoryV2.consumeApprovalToken({
-        userId,
-        actionType: name,
-        token: approvalToken,
-        requestId: requestId || undefined,
-      });
-      if (consumed.approved) {
-        return;
-      }
-    }
-
-    const created = this.memoryV2.createApprovalRequest({
-      userId,
-      actionType: name,
-      actionPayload: params,
-      reason: `Autonomous execution requested approval for tool '${name}'.`,
-    });
-
-    const detail = {
-      requestId: created.id,
-      actionType: name,
-      reason: "high_impact_action_requires_approval",
-      expiresAt: created.expiresAt,
-      approvalCommand: `/memory approval approve ${created.id}`,
-    };
-    throw new Error(`APPROVAL_REQUIRED:${JSON.stringify(detail)}`);
   }
 
   /**
@@ -432,7 +281,7 @@ export class Runtime {
   async shutdown(): Promise<void> {
     await this.executor.shutdown();
     await this.tools.shutdown();
-    this.memoryV2?.close();
+    this.markdownMemory.close();
     this.memory.close();
   }
 }
@@ -440,7 +289,7 @@ export class Runtime {
 // Re-export types
 export * from "./executor";
 export * from "./memory";
-export * from "./memory-v2";
+export * from "./markdown-memory/index";
 export * from "./security";
 export * from "./tools";
 export * from "./planner";

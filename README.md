@@ -110,48 +110,6 @@ Live progress streaming is enabled by default for long web-assist turns.
 
 ---
 
-## 💬 WhatsApp Setup
-
-Nova supports WhatsApp as a messaging channel with **identity-aware routing** — it knows who is messaging and acts accordingly.
-
-### Two modes
-
-| Mode           | Use case                          | How it works                                                                                                |
-| -------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **Own-number** | Your personal WhatsApp            | Nova reads your outgoing messages and replies in-chat. Messages from others are silently ignored.           |
-| **Bot-number** | Separate WhatsApp Business number | Nova runs on a dedicated number. It recognizes you (the owner) and optionally allows other numbers to chat. |
-
-### Quick setup
-
-```bash
-nova whatsapp setup    # Guided setup: mode, phone number, name, allowed list
-nova daemon restart
-nova whatsapp status
-```
-
-The setup flow prompts for:
-
-1. **Mode** — own number or separate bot number
-2. **Your phone number** — so Nova recognizes you as the owner
-3. **Your name** — so Nova can refer to you personally
-4. **Allowed numbers** (bot-number mode only) — optional list of additional numbers that can chat with Nova
-
-### Identity-aware behavior
-
-- **Owner messages** → Nova responds as your personal assistant, references past conversations, and proactively suggests things
-- **Authorized third-party** (bot-number mode) → Nova responds on your behalf, clearly identifying itself as your AI assistant. **Strict privacy**: never shares your personal data, memories, or conversation history with anyone else.
-- **Unauthorized sender** (bot-number mode) → Polite "not available" reply + notification sent to you with a preview of their message
-
-### Environment variables
-
-| Variable                        | Description                                                  |
-| ------------------------------- | ------------------------------------------------------------ |
-| `NOVA_WHATSAPP_ENABLED`         | `true` to enable the channel                                 |
-| `NOVA_WHATSAPP_OWNER_NUMBER`    | Your phone number (digits only, with country code)           |
-| `NOVA_WHATSAPP_OWNER_NAME`      | Your display name                                            |
-| `NOVA_WHATSAPP_IS_OWN_NUMBER`   | `true` for own-number mode                                   |
-| `NOVA_WHATSAPP_ALLOWED_NUMBERS` | Comma-separated list of authorized numbers (bot-number mode) |
-
 Web-assisted external data is available behind feature flags.
 
 - Enable web-agent engine: `NOVA_WEB_AGENT_ENABLED=true|false` (default: `true`)

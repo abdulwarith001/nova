@@ -40,8 +40,10 @@
     "benchmark:chat": "tsx scripts/benchmark-chat.ts"
   },
   "devDependencies": {
+    "@types/jsdom": "^27.0.0",
     "@types/node": "^20.11.0",
     "@types/node-cron": "^3.0.11",
+    "@types/pdfkit": "^0.17.5",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",
     "eslint": "^8.56.0",
@@ -68,9 +70,6 @@
   "license": "MIT",
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
-    "@types/jsdom": "^27.0.0",
-    "@types/pdfkit": "^0.17.5",
-    "@types/qrcode-terminal": "^0.12.2",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",
     "cron-parser": "^5.5.0",
@@ -85,8 +84,6 @@
     "ora": "^9.2.0",
     "pdfkit": "^0.17.2",
     "playwright": "^1.58.1",
-    "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.34.6",
     "ws": "^8.19.0"
   }
 }

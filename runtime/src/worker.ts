@@ -1,8 +1,5 @@
 import { execSync } from "child_process";
 import { readFileSync, writeFileSync } from "fs";
-import { config } from "dotenv";
-import { homedir } from "os";
-import { join } from "path";
 import {
   ActionExecutor,
   ProfileAssignmentStore,
@@ -13,8 +10,9 @@ import {
   type ObservationMode,
   type WebAction,
 } from "./web-agent/index.js";
+import { ensureEnvLoaded } from "./config.js";
 
-config({ path: join(homedir(), ".nova", ".env") });
+ensureEnvLoaded();
 
 interface ToolExecutionContext {
   sessionId?: string;
@@ -184,12 +182,18 @@ async function executeWebSessionStart(
   const headless = resolveWebHeadless(params);
   const viewport = isObject(params.viewport)
     ? {
-        width: Number((params.viewport as Record<string, unknown>).width || 1366),
-        height: Number((params.viewport as Record<string, unknown>).height || 900),
+        width: Number(
+          (params.viewport as Record<string, unknown>).width || 1366,
+        ),
+        height: Number(
+          (params.viewport as Record<string, unknown>).height || 900,
+        ),
       }
     : { width: 1366, height: 900 };
 
-  const locale = String(params.locale || process.env.NOVA_WEB_LOCALE || "en-US");
+  const locale = String(
+    params.locale || process.env.NOVA_WEB_LOCALE || "en-US",
+  );
   const timezone = String(
     params.timezone ||
       process.env.NOVA_WEB_TIMEZONE ||
@@ -253,7 +257,9 @@ function normalizeAction(params: Record<string, unknown>): WebAction {
     };
   }
 
-  throw new Error("web_act requires an 'action' object or action fields at the top level");
+  throw new Error(
+    "web_act requires an 'action' object or action fields at the top level",
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -300,7 +306,9 @@ export function resolveWebBackend(
   params: Record<string, unknown>,
   envValue: string | undefined = process.env.NOVA_WEB_BACKEND,
 ): WebBackendPreference {
-  const explicit = String(params.backend || "").trim().toLowerCase();
+  const explicit = String(params.backend || "")
+    .trim()
+    .toLowerCase();
   if (
     explicit === "local" ||
     explicit === "browserbase" ||
@@ -309,7 +317,9 @@ export function resolveWebBackend(
   ) {
     return explicit;
   }
-  const env = String(envValue || "").trim().toLowerCase();
+  const env = String(envValue || "")
+    .trim()
+    .toLowerCase();
   if (env === "local" || env === "browserbase" || env === "steel") return env;
   return "auto";
 }
@@ -400,7 +410,9 @@ async function executeCurl(params: Record<string, unknown>): Promise<{
     throw new Error("Invalid url parameter. Expected http/https URL.");
   }
 
-  const method = String(params.method || "GET").trim().toUpperCase();
+  const method = String(params.method || "GET")
+    .trim()
+    .toUpperCase();
   const allowedMethods = new Set([
     "GET",
     "POST",
@@ -416,7 +428,9 @@ async function executeCurl(params: Record<string, unknown>): Promise<{
 
   const timeoutMs = Math.max(
     500,
-    Number.isFinite(Number(params.timeoutMs)) ? Number(params.timeoutMs) : 30_000,
+    Number.isFinite(Number(params.timeoutMs))
+      ? Number(params.timeoutMs)
+      : 30_000,
   );
   const maxChars = Math.max(
     500,
@@ -467,7 +481,9 @@ async function executeCurl(params: Record<string, unknown>): Promise<{
 
     const rawBody = method === "HEAD" ? "" : await response.text();
     const truncated = rawBody.length > maxChars;
-    const outBody = truncated ? `${rawBody.slice(0, maxChars)}... [truncated]` : rawBody;
+    const outBody = truncated
+      ? `${rawBody.slice(0, maxChars)}... [truncated]`
+      : rawBody;
 
     return {
       ok: response.ok,
@@ -483,7 +499,9 @@ async function executeCurl(params: Record<string, unknown>): Promise<{
     if (error?.name === "AbortError") {
       throw new Error(`curl request timed out after ${timeoutMs}ms`);
     }
-    throw new Error(`curl request failed: ${error?.message || "Unknown error"}`);
+    throw new Error(
+      `curl request failed: ${error?.message || "Unknown error"}`,
+    );
   } finally {
     clearTimeout(timeoutId);
   }

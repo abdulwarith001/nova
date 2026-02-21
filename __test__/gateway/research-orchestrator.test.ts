@@ -16,8 +16,24 @@ function buildRuntimeMock() {
 
   const search = vi.fn().mockResolvedValue([]);
 
+  const mockConvStore = {
+    addMessage: vi.fn(),
+    getRecentMessages: vi.fn().mockReturnValue([]),
+    ensureConversation: vi.fn(),
+  };
+
+  const mockKnowledgeStore = {
+    getTopMemoryItems: vi.fn().mockReturnValue([]),
+    getUserTraits: vi.fn().mockReturnValue([]),
+    getRelationships: vi.fn().mockReturnValue([]),
+  };
+
   return {
     getMemory: () => ({ store, search }),
+    getMarkdownMemory: () => ({
+      getConversationStore: () => mockConvStore,
+      getKnowledgeStore: () => mockKnowledgeStore,
+    }),
     getToolsForAgent: () => [
       {
         name: "search_web",

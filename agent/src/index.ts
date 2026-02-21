@@ -1,9 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
-import { z } from "zod";
 
 // LLM Provider types
-export type LLMProvider = "anthropic" | "openai" | "google";
+export type LLMProvider = "anthropic" | "openai";
 
 export interface AgentConfig {
   provider: LLMProvider;
