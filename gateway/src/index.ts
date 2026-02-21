@@ -399,6 +399,7 @@ async function start() {
         ? process.env.NOVA_WHATSAPP_ALLOWED_NUMBERS.split(",").filter(Boolean)
         : undefined,
       messagePrefix: "Nova:",
+      ownerName: process.env.NOVA_WHATSAPP_OWNER_NAME || undefined,
     },
     chatService,
   );

@@ -48,3 +48,7 @@ coverage/
 # Ignore lock files (keep package-lock.json)
 yarn.lock
 pnpm-lock.yaml
+
+# Ignore WhatsApp Web JS runtime files
+.wwebjs_cache/
+.wwebjs_auth/

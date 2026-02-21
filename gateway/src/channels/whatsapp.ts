@@ -79,6 +79,8 @@ export interface WhatsAppChannelConfig {
   isOwnNumber?: boolean;
   /** Prefix for agent messages when using own number (default: "Nova:") */
   messagePrefix?: string;
+  /** The user's display name — used by the agent when referring to the user */
+  ownerName?: string;
 }
 
 export interface WhatsAppChannelStatus {
@@ -100,6 +102,8 @@ export class WhatsAppChannel {
   private lastError: string | undefined;
   private lastErrorAt: string | undefined;
   private messagePrefix: string;
+  /** Tracks last owner message timestamp per chat — used for first-message proactive hook */
+  private lastOwnerMessageAt = new Map<string, number>();
 
   constructor(
     private readonly config: WhatsAppChannelConfig,
@@ -245,6 +249,59 @@ export class WhatsAppChannel {
     };
   }
 
+  /**
+   * Resolve the sender's display name from the WhatsApp contact.
+   * Falls back through: saved contact name → WhatsApp profile name → phone number.
+   */
+  private async resolveSenderName(msg: any): Promise<string> {
+    try {
+      const contact = await msg.getContact();
+      return (
+        contact?.name ||
+        contact?.pushname ||
+        contact?.shortName ||
+        contact?.number ||
+        "Unknown"
+      );
+    } catch {
+      return "Unknown";
+    }
+  }
+
+  /**
+   * Resolve sender contact info (name + phone number) from the WhatsApp contact.
+   * WhatsApp may use LIDs (@lid) in msg.from instead of phone numbers,
+   * so we must get the real number from the contact object.
+   */
+  private async resolveContact(
+    msg: any,
+  ): Promise<{ name: string; number: string }> {
+    try {
+      const contact = await msg.getContact();
+      const name =
+        contact?.name ||
+        contact?.pushname ||
+        contact?.shortName ||
+        contact?.number ||
+        "Unknown";
+      // contact.number is the actual phone number, even when msg.from is a LID
+      const number =
+        contact?.number ||
+        String(msg.from || "")
+          .replace("@c.us", "")
+          .replace("@s.whatsapp.net", "")
+          .replace("@lid", "");
+      return { name, number };
+    } catch {
+      // Fallback: parse from msg.from
+      const fallback = String(msg.from || "")
+        .replace("@c.us", "")
+        .replace("@s.whatsapp.net", "")
+        .replace("@lid", "");
+      return { name: "Unknown", number: fallback };
+    }
+  }
+
   private async handleMessage(msg: any): Promise<void> {
     // Skip non-text, status broadcasts, and group messages (for now)
     if (msg.type !== "chat") return;
@@ -267,44 +324,71 @@ export class WhatsAppChannel {
       .replace("@c.us", "")
       .replace("@s.whatsapp.net", "");
     const isFromMe = Boolean(msg.fromMe);
+    const ownerName = this.config.ownerName || "the user";
 
     if (this.config.isOwnNumber) {
       // Own-number mode:
       // - Messages FROM the owner (fromMe=true): user is talking to Nova → process
       // - Messages TO the owner (fromMe=false): someone messaged user → process if authorized
       if (isFromMe) {
-        // Owner sent this message — treat as input to Nova
-        // Use the recipient (toNumber) as the conversation partner
+        // Owner sent this message — process as input to Nova
         const chatId = toNumber;
-        await this.processMessage(msg, text, chatId);
+        await this.processMessage(msg, text, chatId, {
+          senderName: ownerName,
+          senderNumber: this.config.ownerNumber || fromNumber,
+          isOwner: true,
+        });
       } else {
-        // Someone else messaged the owner
-        if (!this.isAuthorized(fromNumber)) {
-          console.log(
-            JSON.stringify({
-              type: "whatsapp_update",
-              auth_result: "denied",
-              sender: fromNumber,
-            }),
-          );
-          return;
-        }
-        await this.processMessage(msg, text, fromNumber);
+        // Someone else messaged the owner — in own-number mode, Nova does
+        // not respond to anyone else. Silently ignore.
+        return;
       }
     } else {
       // Bot-number mode: only process incoming messages
       if (isFromMe) return;
-      if (!this.isAuthorized(fromNumber)) {
+
+      // Resolve sender info — WhatsApp may use LIDs (@lid) instead of phone
+      // numbers in msg.from, so we must get the real number from the contact.
+      const contact = await this.resolveContact(msg);
+      const senderName = contact.name;
+      const senderPhoneNumber = contact.number;
+      const isOwner =
+        senderPhoneNumber.replace(/\D/g, "") ===
+        (this.config.ownerNumber || "").replace(/\D/g, "");
+
+      console.log(
+        JSON.stringify({
+          type: "whatsapp_incoming",
+          from_raw: fromNumber,
+          resolved_number: senderPhoneNumber,
+          configured_owner: this.config.ownerNumber,
+          is_owner: isOwner,
+          authorized: this.isAuthorized(senderPhoneNumber),
+        }),
+      );
+
+      if (!this.isAuthorized(senderPhoneNumber)) {
+        // Politely respond and notify the owner
+        await this.sendReply(
+          msg,
+          `Hi ${senderName}, ${ownerName} is not available right now. I'm Nova, their AI assistant. I'll let them know you reached out.`,
+        );
+        await this.notifyOwner(senderName, senderPhoneNumber, text);
         console.log(
           JSON.stringify({
             type: "whatsapp_update",
-            auth_result: "denied",
-            sender: fromNumber,
+            auth_result: "denied_with_reply",
+            sender: senderPhoneNumber,
+            sender_name: senderName,
           }),
         );
         return;
       }
-      await this.processMessage(msg, text, fromNumber);
+      await this.processMessage(msg, text, senderPhoneNumber, {
+        senderName,
+        senderNumber: senderPhoneNumber,
+        isOwner,
+      });
     }
   }
 
@@ -312,6 +396,11 @@ export class WhatsAppChannel {
     msg: any,
     text: string,
     chatId: string,
+    senderInfo: {
+      senderName: string;
+      senderNumber: string;
+      isOwner: boolean;
+    },
   ): Promise<void> {
     // Handle commands
     if (text.toLowerCase() === "/reset") {
@@ -326,7 +415,49 @@ export class WhatsAppChannel {
     // Show typing indicator
     await chat.sendStateTyping();
 
-    const requestId = `whatsapp-${chatId}-${Date.now()}`;
+    // Build sender context for the agent
+    const ownerName = this.config.ownerName || "the user";
+    let senderContext: string;
+
+    if (senderInfo.isOwner) {
+      const timeOfDay = this.getTimeOfDay();
+      const chatKey = `whatsapp:${chatId}`;
+      const lastMsg = this.lastOwnerMessageAt.get(chatKey);
+      const gapHours = lastMsg
+        ? (Date.now() - lastMsg) / (1000 * 60 * 60)
+        : Infinity;
+      const isFirstMessage = gapHours > 1;
+
+      const parts: string[] = [
+        `You are Nova, ${ownerName}'s personal AI assistant.`,
+        `The person messaging you right now IS ${ownerName} — your owner. You know them.`,
+        `It is currently ${timeOfDay}. Greet them accordingly (e.g. "Good morning ${ownerName}!" or "Hey ${ownerName}, evening!").`,
+        `Be proactive: suggest helpful things, remind them of things they mentioned before, offer ideas.`,
+        `You have full access to your conversation history with ${ownerName} and should use it.`,
+        `You have access to tools: Gmail, Google Calendar, Google Drive, and web search. Proactively offer to use them (e.g. "Want me to check your calendar?" or "I can search that for you").`,
+      ];
+
+      if (isFirstMessage) {
+        parts.push(
+          `This is the start of a new conversation or it's been a while since ${ownerName} last messaged. ` +
+            `Be extra proactive: suggest checking their calendar, offer a quick summary, or bring up something useful based on the time of day.`,
+        );
+      }
+
+      senderContext = parts.join(" ");
+    } else {
+      senderContext =
+        `You are Nova, ${ownerName}'s personal AI assistant, responding on their WhatsApp. ` +
+        `You are NOT ${ownerName} — never pretend to be them. Clearly identify yourself as Nova, their AI assistant. ` +
+        `This message is from ${senderInfo.senderName} (${senderInfo.senderNumber}), who is authorized to chat with you. ` +
+        `PRIVACY RULES (CRITICAL — never violate these): ` +
+        `- NEVER share ${ownerName}'s personal information, memories, conversation history, schedule, or any private data with anyone other than ${ownerName}. ` +
+        `- NEVER reveal what ${ownerName} has told you in past conversations. ` +
+        `- If asked about ${ownerName}'s personal details, politely decline and suggest they ask ${ownerName} directly. ` +
+        `Respond helpfully and politely on behalf of ${ownerName}. If you need more information from ${ownerName} to answer properly, ` +
+        `let ${senderInfo.senderName} know that you'll check with ${ownerName} and get back to them. ` +
+        `Keep responses concise — this is WhatsApp.`;
+    }
 
     try {
       const result = await this.chatService.runChatTurn({
@@ -334,7 +465,7 @@ export class WhatsAppChannel {
         sessionId: `whatsapp:${chatId}`,
         historyKey: `whatsapp:${chatId}`,
         channel: "whatsapp",
-        requestId,
+        senderContext,
       });
 
       const responseText = String(result.response || "").trim();
@@ -350,9 +481,16 @@ export class WhatsAppChannel {
           type: "whatsapp_update",
           auth_result: "allowed",
           chat_id: chatId,
+          sender_name: senderInfo.senderName,
+          is_owner: senderInfo.isOwner,
           time_total_ms: Number((performance.now() - startedAt).toFixed(1)),
         }),
       );
+
+      // Track last owner message time for first-message proactive hook
+      if (senderInfo.isOwner) {
+        this.lastOwnerMessageAt.set(`whatsapp:${chatId}`, Date.now());
+      }
     } catch (error) {
       console.error("whatsapp response error:", error);
       await chat.clearState();
@@ -360,19 +498,76 @@ export class WhatsAppChannel {
     }
   }
 
+  private getTimeOfDay(): string {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return "morning";
+    if (hour >= 12 && hour < 17) return "afternoon";
+    if (hour >= 17 && hour < 21) return "evening";
+    return "night";
+  }
+
   private isAuthorized(senderNumber: string): boolean {
     // If no owner configured, deny all
     if (!this.config.ownerNumber) return false;
 
+    // Normalize both numbers to digits-only for comparison
+    // (WhatsApp Business can deliver numbers in slightly different formats)
+    const normalize = (n: string) => n.replace(/\D/g, "");
+    const normalized = normalize(senderNumber);
+    const ownerNormalized = normalize(this.config.ownerNumber);
+
     // Owner is always allowed
-    if (senderNumber === this.config.ownerNumber) return true;
+    if (normalized === ownerNormalized) return true;
 
     // Check allowed numbers list
     if (this.config.allowedNumbers?.length) {
-      return this.config.allowedNumbers.includes(senderNumber);
+      return this.config.allowedNumbers.some(
+        (n) => normalize(n) === normalized,
+      );
     }
 
     return false;
+  }
+
+  /**
+   * Notify the owner about an incoming message from someone.
+   * Sends a summary directly to the owner's WhatsApp chat.
+   */
+  private async notifyOwner(
+    senderName: string,
+    senderNumber: string,
+    messagePreview: string,
+  ): Promise<void> {
+    if (!this.config.ownerNumber || !this.client) return;
+
+    const ownerChatId = `${this.config.ownerNumber}@c.us`;
+    const preview =
+      messagePreview.length > 200
+        ? messagePreview.slice(0, 200) + "..."
+        : messagePreview;
+
+    const notification =
+      `📩 New message from ${senderName} (${senderNumber}):\n` +
+      `"${preview}"\n\n` +
+      `_They were told you're not available. Reply to them directly if needed._`;
+
+    try {
+      await this.client.sendMessage(ownerChatId, notification);
+    } catch (error) {
+      console.error("Failed to notify owner:", error);
+    }
+  }
+
+  /**
+   * Send a message directly to a specific chat ID.
+   */
+  private async sendDirectMessage(chatId: string, text: string): Promise<void> {
+    if (!this.client) return;
+    try {
+      await this.client.sendMessage(chatId, text);
+    } catch (error) {
+      console.error("Failed to send direct message:", error);
+    }
   }
 
   private async sendReply(msg: any, text: string): Promise<void> {

@@ -148,7 +148,9 @@ async function setupWhatsApp(): Promise<void> {
     {
       type: "input",
       name: "ownerNumber",
-      message: "Your phone number (with country code, no +):",
+      message: isOwnNumber
+        ? "Your phone number (with country code, no +):"
+        : "Your phone number (so Nova can recognize you, with country code, no +):",
       default: env.NOVA_WHATSAPP_OWNER_NUMBER || "",
       validate: (input: string) => {
         const cleaned = input.replace(/\D/g, "");
@@ -158,27 +160,39 @@ async function setupWhatsApp(): Promise<void> {
     },
   ]);
 
-  const { addAllowed } = await inquirer.prompt([
+  const { ownerName } = await inquirer.prompt([
     {
-      type: "confirm",
-      name: "addAllowed",
-      message:
-        "Allow other numbers to chat with Nova? (You can add/change later)",
-      default: false,
+      type: "input",
+      name: "ownerName",
+      message: "Your name (so Nova knows how to refer to you):",
+      default: env.NOVA_WHATSAPP_OWNER_NAME || "",
     },
   ]);
 
+  // Allowed list only applies in bot-number mode
   let allowedNumbers = "";
-  if (addAllowed) {
-    const { numbers } = await inquirer.prompt([
+  if (!isOwnNumber) {
+    const { addAllowed } = await inquirer.prompt([
       {
-        type: "input",
-        name: "numbers",
-        message: "Allowed numbers (comma-separated, with country code):",
-        default: env.NOVA_WHATSAPP_ALLOWED_NUMBERS || "",
+        type: "confirm",
+        name: "addAllowed",
+        message:
+          "Allow other numbers to chat with Nova? (You can add/change later)",
+        default: false,
       },
     ]);
-    allowedNumbers = numbers;
+
+    if (addAllowed) {
+      const { numbers } = await inquirer.prompt([
+        {
+          type: "input",
+          name: "numbers",
+          message: "Allowed numbers (comma-separated, with country code):",
+          default: env.NOVA_WHATSAPP_ALLOWED_NUMBERS || "",
+        },
+      ]);
+      allowedNumbers = numbers;
+    }
   }
 
   // Save config
@@ -188,6 +202,10 @@ async function setupWhatsApp(): Promise<void> {
     NOVA_WHATSAPP_OWNER_NUMBER: ownerNumber.replace(/\D/g, ""),
     NOVA_WHATSAPP_IS_OWN_NUMBER: String(isOwnNumber),
   };
+
+  if (ownerName) {
+    nextEnv.NOVA_WHATSAPP_OWNER_NAME = ownerName.trim();
+  }
 
   if (allowedNumbers) {
     nextEnv.NOVA_WHATSAPP_ALLOWED_NUMBERS = allowedNumbers
@@ -323,6 +341,9 @@ function showStatus(): void {
   );
   console.log(
     `Owner: ${env.NOVA_WHATSAPP_OWNER_NUMBER || chalk.red("(not set)")}`,
+  );
+  console.log(
+    `Owner name: ${env.NOVA_WHATSAPP_OWNER_NAME || chalk.gray("(not set)")}`,
   );
   console.log(
     `Own number: ${env.NOVA_WHATSAPP_IS_OWN_NUMBER === "true" ? "yes" : "no"}`,
