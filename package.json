@@ -12,7 +12,7 @@
     "studio"
   ],
   "scripts": {
-    "build": "npm run build:core && npm run build:gateway && npm run build:agent && npm run build:cli && npm run build:studio",
+    "build": "npm run build:gateway && npm run build:agent && npm run build:cli && npm run build:studio",
     "build:core": "cd core && cargo build --release",
     "build:gateway": "cd gateway && npm run build",
     "build:agent": "cd agent && npm run build",

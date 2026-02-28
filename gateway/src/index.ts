@@ -6,7 +6,6 @@ import { Runtime } from "../../runtime/src/index.js";
 import path from "path";
 import { homedir } from "os";
 import { ensureEnvLoaded, loadNovaConfig } from "../../runtime/src/config.js";
-import { loadSoul } from "../../runtime/src/soul.js";
 import { HeartbeatEngine } from "../../runtime/src/heartbeat.js";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
 import { ChatService } from "./chat-service.js";
@@ -60,14 +59,19 @@ async function start() {
   // Initialize Nova Runtime with full tool support
   console.log("🔧 Initializing Nova Runtime...");
   const gatewayConfig = loadGatewayConfig();
+  const novaConfig = loadNovaConfig();
   const agentConfig = {
-    provider: (process.env.DEFAULT_PROVIDER as any) || "openai",
-    model: process.env.DEFAULT_MODEL || "gpt-4o-mini",
+    provider: (process.env.DEFAULT_PROVIDER ||
+      (novaConfig as any).defaultProvider ||
+      "openai") as any,
+    model:
+      process.env.DEFAULT_MODEL ||
+      (novaConfig as any).defaultModel ||
+      "gpt-4o-mini",
     apiKey: process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY,
   };
 
   const runtime = await Runtime.create({
-    memoryPath: path.join(homedir(), ".nova", "memory.db"),
     security: {
       sandboxMode: "none",
       allowedTools: ["*"],
@@ -81,9 +85,10 @@ async function start() {
   });
   console.log("✅ Runtime initialized");
 
-  // Load soul.md personality
-  const soulContent = loadSoul();
-  console.log("✅ Loaded soul.md");
+  // Load agent identity from IDENTITY.md profile
+  const profileStore = runtime.getMarkdownMemory().getProfileStore();
+  const soulContent = profileStore.getIdentity();
+  console.log("✅ Loaded IDENTITY.md");
 
   const agent = new Agent(agentConfig, soulContent);
 
@@ -92,9 +97,14 @@ async function start() {
   console.log(`📋 Loaded ${allTools.length} tools`);
 
   // === Wire tools that need runtime references ===
-  const { wireBrowseTools, wireGoogleWorkspaceTools, wireSkillTools } =
-    await import("./tool-wiring.js");
+  const {
+    wireBrowseTools,
+    wireGoogleWorkspaceTools,
+    wireSkillTools,
+    wireProfileTools,
+  } = await import("./tool-wiring.js");
   await wireSkillTools(runtime);
+  wireProfileTools(runtime);
   await wireBrowseTools(runtime, agent);
   await wireGoogleWorkspaceTools(runtime);
 

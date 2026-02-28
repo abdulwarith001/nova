@@ -126,6 +126,14 @@ program
   });
 
 program
+  .command("reset [action]")
+  .description("Reset agent data (all|select interactively)")
+  .action(async (action?: string) => {
+    const { resetCommand } = await import("./commands/reset.js");
+    return resetCommand(action);
+  });
+
+program
   .command("soul [action]")
   .description("Manage agent personality (edit|show|reset)")
   .action(async (action?: string) => {

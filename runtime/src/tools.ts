@@ -113,6 +113,45 @@ export class ToolRegistry {
       permissions: ["filesystem:write"],
     });
 
+    this.register({
+      name: "update_profile",
+      description:
+        "Update the user profile or agent identity file. Use this whenever you learn something new about the user (name, preferences, projects, etc.) or about yourself (learned behaviors, communication adjustments). The profile content is always available to you in context.",
+      category: "data",
+      keywords: [
+        "update",
+        "profile",
+        "memory",
+        "remember",
+        "learn",
+        "user",
+        "identity",
+      ],
+      examples: [
+        "update user profile with their name",
+        "remember their timezone",
+        "update my identity with learned behavior",
+      ],
+      parametersSchema: {
+        type: "object",
+        properties: {
+          file: {
+            type: "string",
+            enum: ["user", "identity"],
+            description:
+              "Which profile to update: 'user' for user info, 'identity' for agent self-knowledge",
+          },
+          content: {
+            type: "string",
+            description:
+              "The full updated Markdown content for the profile. You must include ALL existing sections — this replaces the entire file. Read the current profile first, then modify the relevant section.",
+          },
+        },
+        required: ["file", "content"],
+      },
+      permissions: [],
+    });
+
     // === Internal tools (used by external data orchestrator, hidden from direct chat LLM) ===
     this.register({
       name: "curl",

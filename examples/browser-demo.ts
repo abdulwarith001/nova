@@ -17,7 +17,6 @@ async function main() {
   // Create runtime with browser tools
   console.log("1️⃣  Creating runtime with browser automation...");
   const runtime = await Runtime.create({
-    memoryPath: ":memory:",
     security: {
       sandboxMode: "none",
       allowedTools: [

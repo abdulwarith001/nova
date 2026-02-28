@@ -10,7 +10,6 @@ async function main() {
   // Create runtime
   console.log("1️⃣  Creating runtime...");
   const runtime = await Runtime.create({
-    memoryPath: ":memory:",
     security: {
       sandboxMode: "none",
       allowedTools: ["bash", "read", "write"],
@@ -84,32 +83,26 @@ async function main() {
   console.log(`   Output: ${JSON.stringify(bashResult.outputs[0])}`);
   console.log(`   Duration: ${bashResult.durationMs}ms\n`);
 
-  // Test 4: Memory storage
-  console.log("5️⃣  Test: Memory storage");
-  const memory = runtime.getMemory();
+  // Test 4: Knowledge storage
+  console.log("5️⃣  Test: Knowledge storage");
+  const store = runtime.getMarkdownMemory().getKnowledgeJsonStore();
 
-  await memory.store({
-      id: "demo-memory",
-      content: "Nova successfully executed bash, read, and write operations",
-      timestamp: Date.now(),
-      importance: 0.9,
-      decayRate: 0.1,
-      tags: ["demo", "success", "tools"],
-      source: "end-to-end-demo",
-      metadata: {
-          tasksExecuted: 3,
-          toolsUsed: ["bash", "read", "write"],
-      },
-      category: "self"
+  store.addEntry({
+    category: "fact",
+    subject: "demo_execution",
+    content: "Nova successfully executed bash, read, and write operations",
+    tags: ["demo", "success", "tools"],
+    importance: 0.9,
+    source: "system",
   });
-  console.log("   ✅ Memory stored\n");
+  console.log("   ✅ Knowledge stored\n");
 
-  // Test 5: Search memory
-  console.log("6️⃣  Test: Memory search");
-  const searchResults = await memory.search("Nova executed", 5);
-  console.log(`   ✅ Found ${searchResults.length} memories`);
+  // Test 5: Search knowledge
+  console.log("6️⃣  Test: Knowledge search");
+  const searchResults = store.search("Nova executed");
+  console.log(`   ✅ Found ${searchResults.length} entries`);
   if (searchResults.length > 0) {
-    console.log(`   First result: "${searchResults[0].content}"\n`);
+    console.log(`   First result: "${searchResults[0].entry.content}"\n`);
   }
 
   // Summary
@@ -119,8 +112,8 @@ async function main() {
   console.log("  ✅ Wrote a file to disk");
   console.log("  ✅ Read the file back");
   console.log("  ✅ Executed bash commands");
-  console.log("  ✅ Stored memories in SQLite");
-  console.log("  ✅ Searched memories with FTS5");
+  console.log("  ✅ Stored knowledge entries");
+  console.log("  ✅ Searched knowledge with ranking");
   console.log("\n🚀 Nova is fully operational!");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 

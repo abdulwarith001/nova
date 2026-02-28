@@ -40,6 +40,58 @@ export interface LLMResponse {
   thinking?: string;
 }
 
+// ── Retry helper for transient API errors ───────────────────────────────────
+
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503]);
+const MAX_RETRIES = 2;
+const BASE_DELAY_MS = 500;
+
+function isRetryableError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as any;
+  // HTTP status codes from API SDKs
+  if (typeof e.status === "number" && RETRYABLE_STATUS_CODES.has(e.status))
+    return true;
+  if (
+    typeof e.statusCode === "number" &&
+    RETRYABLE_STATUS_CODES.has(e.statusCode)
+  )
+    return true;
+  // Network-level errors
+  const msg = String(e.message || "").toLowerCase();
+  if (
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("etimedout") ||
+    msg.includes("socket hang up") ||
+    msg.includes("network")
+  )
+    return true;
+  return false;
+}
+
+async function retryWithBackoff<T>(fn: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_RETRIES && isRetryableError(err)) {
+        const delay =
+          BASE_DELAY_MS * Math.pow(2, attempt) + Math.random() * 200;
+        console.warn(
+          `⚠️ LLM API call failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${Math.round(delay)}ms...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
 // Agent class with tool calling support
 export class Agent {
   private config: AgentConfig;
@@ -117,14 +169,16 @@ export class Agent {
       messages.find((m) => m.role === "system")?.content || this.systemPrompt;
     const userMessages = messages.filter((m) => m.role !== "system");
 
-    const response = (await (this.anthropicClient.messages.create as any)({
-      model: this.config.model || "claude-3-5-sonnet-20241022",
-      max_tokens: this.config.maxTokens || 4096,
-      temperature: this.config.temperature || 0.7,
-      system: systemMessage,
-      messages: userMessages as any,
-      tools: anthropicTools as any,
-    })) as any;
+    const response = (await retryWithBackoff(() =>
+      (this.anthropicClient!.messages.create as any)({
+        model: this.config.model || "claude-3-5-sonnet-20241022",
+        max_tokens: this.config.maxTokens || 4096,
+        temperature: this.config.temperature || 0.7,
+        system: systemMessage,
+        messages: userMessages as any,
+        tools: anthropicTools as any,
+      }),
+    )) as any;
 
     // Extract tool calls
     const toolCalls: ToolCall[] = [];
@@ -172,13 +226,15 @@ export class Agent {
       },
     }));
 
-    const response = await this.openaiClient.chat.completions.create({
-      model: this.config.model || "gpt-4-turbo",
-      messages: messages as any,
-      temperature: this.config.temperature || 0.7,
-      max_tokens: this.config.maxTokens || 4096,
-      tools: openaiTools,
-    });
+    const response = await retryWithBackoff(() =>
+      this.openaiClient!.chat.completions.create({
+        model: this.config.model || "gpt-4-turbo",
+        messages: messages as any,
+        temperature: this.config.temperature || 0.7,
+        max_tokens: this.config.maxTokens || 4096,
+        tools: openaiTools,
+      }),
+    );
 
     const choice = response.choices[0];
     const toolCalls: ToolCall[] = [];
@@ -208,17 +264,19 @@ export class Agent {
    */
   private async chatInternal(messages: Message[]): Promise<LLMResponse> {
     if (this.config.provider === "anthropic" && this.anthropicClient) {
-      const response = await this.anthropicClient.messages.create({
-        model: this.config.model || "claude-3-5-sonnet-20241022",
-        max_tokens: this.config.maxTokens || 4096,
-        temperature: this.config.temperature || 0.7,
-        messages: messages
-          .filter((m) => m.role !== "system")
-          .map((m) => ({
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })),
-      });
+      const response = await retryWithBackoff(() =>
+        this.anthropicClient!.messages.create({
+          model: this.config.model || "claude-3-5-sonnet-20241022",
+          max_tokens: this.config.maxTokens || 4096,
+          temperature: this.config.temperature || 0.7,
+          messages: messages
+            .filter((m) => m.role !== "system")
+            .map((m) => ({
+              role: m.role as "user" | "assistant",
+              content: m.content,
+            })),
+        }),
+      );
 
       return {
         content:
@@ -231,14 +289,16 @@ export class Agent {
     }
 
     if (this.config.provider === "openai" && this.openaiClient) {
-      const response = await this.openaiClient.chat.completions.create({
-        model: this.config.model || "gpt-4o-mini",
-        temperature: this.config.temperature || 0.7,
-        messages: messages.map((m) => ({
-          role: m.role as "user" | "assistant" | "system",
-          content: m.content,
-        })),
-      });
+      const response = await retryWithBackoff(() =>
+        this.openaiClient!.chat.completions.create({
+          model: this.config.model || "gpt-4o-mini",
+          temperature: this.config.temperature || 0.7,
+          messages: messages.map((m) => ({
+            role: m.role as "user" | "assistant" | "system",
+            content: m.content,
+          })),
+        }),
+      );
 
       const choice = response.choices[0];
       return {

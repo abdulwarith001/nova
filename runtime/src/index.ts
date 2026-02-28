@@ -1,5 +1,4 @@
 import { Executor, ExecutorConfig } from "./executor";
-import { MemoryStore } from "./memory";
 import {
   MarkdownMemory,
   type ChannelType,
@@ -16,11 +15,10 @@ import { homedir } from "os";
 ensureEnvLoaded();
 
 export interface RuntimeConfig {
-  memoryPath: string;
   novaDir?: string;
   security: SecurityConfig;
   executor: ExecutorConfig;
-  agent: {
+  agent?: {
     provider: "openai" | "anthropic";
     model: string;
     apiKey?: string;
@@ -50,7 +48,6 @@ export interface TaskResult {
  */
 export class Runtime {
   private executor: Executor;
-  private memory: MemoryStore;
   private security: SecurityManager;
   private tools: ToolRegistry;
   private planner: Planner;
@@ -58,14 +55,12 @@ export class Runtime {
 
   private constructor(
     executor: Executor,
-    memory: MemoryStore,
     security: SecurityManager,
     tools: ToolRegistry,
     planner: Planner,
     markdownMemory: MarkdownMemory,
   ) {
     this.executor = executor;
-    this.memory = memory;
     this.security = security;
     this.tools = tools;
     this.planner = planner;
@@ -76,7 +71,6 @@ export class Runtime {
    * Create a new runtime instance
    */
   static async create(config: RuntimeConfig): Promise<Runtime> {
-    const memory = await MemoryStore.create(config.memoryPath);
     const novaDir = config.novaDir || join(homedir(), ".nova");
     const markdownMemory = MarkdownMemory.create(join(novaDir, "memory"));
     const security = new SecurityManager(config.security);
@@ -84,78 +78,8 @@ export class Runtime {
     const executor = new Executor(config.executor);
     const planner = new Planner();
 
-    tools.register({
-      name: "memory_search",
-      description: "Search Nova memory for prior conversations and facts",
-      parametersSchema: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "Search query for memory recall",
-          },
-          limit: {
-            type: "number",
-            description: "Maximum number of entries to return (default: 5)",
-          },
-          category: {
-            type: "string",
-            description:
-              "Optional category filter (self|user|task|fact|conversation)",
-          },
-          minImportance: {
-            type: "number",
-            description: "Optional minimum importance threshold",
-          },
-        },
-      },
-      permissions: [],
-      execute: async (params: any) => {
-        const query = String(params.query || "").trim();
-        const limit = Math.max(
-          1,
-          Math.min(
-            20,
-            Number.isFinite(Number(params.limit)) ? Number(params.limit) : 5,
-          ),
-        );
-        const category = String(params.category || "").trim();
-        const minImportance = Number.isFinite(Number(params.minImportance))
-          ? Number(params.minImportance)
-          : undefined;
-        const allowedCategories = new Set([
-          "self",
-          "user",
-          "task",
-          "fact",
-          "conversation",
-        ]);
-
-        const results = await memory.search(query, {
-          limit,
-          category: allowedCategories.has(category as any)
-            ? (category as any)
-            : undefined,
-          minImportance,
-        });
-
-        return {
-          count: results.length,
-          memories: results.map((entry) => ({
-            id: entry.id,
-            content: entry.content,
-            timestamp: entry.timestamp,
-            importance: entry.importance,
-            category: entry.category,
-            tags: entry.tags,
-          })),
-        };
-      },
-    });
-
     const runtimeInstance = new Runtime(
       executor,
-      memory,
       security,
       tools,
       planner,
@@ -180,9 +104,6 @@ export class Runtime {
     // 3. Execute the plan
     const result = await this.executor.execute(plan, this.tools);
 
-    // 4. Store in memory
-    await this.memory.storeExecution(task, result);
-
     const durationMs = Date.now() - startTime;
 
     return {
@@ -191,10 +112,6 @@ export class Runtime {
       outputs: result.outputs,
       durationMs,
     };
-  }
-
-  getMemory(): MemoryStore {
-    return this.memory;
   }
 
   /**
@@ -282,13 +199,11 @@ export class Runtime {
     await this.executor.shutdown();
     await this.tools.shutdown();
     this.markdownMemory.close();
-    this.memory.close();
   }
 }
 
 // Re-export types
 export * from "./executor";
-export * from "./memory";
 export * from "./markdown-memory/index";
 export * from "./security";
 export * from "./tools";

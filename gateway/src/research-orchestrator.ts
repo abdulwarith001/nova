@@ -9,6 +9,7 @@ import {
   truncateToolContent,
   type ChatHistoryMessage,
 } from "./chat-speed.js";
+import { ProfileExtractor } from "../../runtime/src/profile-extractor.js";
 
 export interface ResearchSource {
   title: string;
@@ -74,10 +75,12 @@ type ToolExecutionResult = {
   error?: string;
 };
 
-const DEFAULT_ERROR_RESPONSE = "I'm sorry, I couldn't complete that request.";
+const DEFAULT_ERROR_RESPONSE =
+  "I wasn't able to fully resolve that request. This may have been due to tool failures or connectivity issues. Could you try rephrasing or breaking it into smaller parts?";
 
 export class ResearchOrchestrator {
   private readonly reasoningEngine: ReasoningEngine;
+  private readonly profileExtractor: ProfileExtractor | null;
 
   constructor(
     private readonly runtime: Runtime,
@@ -85,6 +88,32 @@ export class ResearchOrchestrator {
     private readonly config: ResearchOrchestratorConfig,
   ) {
     this.reasoningEngine = new ReasoningEngine(agent, { mode: "full" });
+
+    // Dedicated cheap agent for profile extraction
+    try {
+      const extractionAgent = new Agent(
+        {
+          provider: config.provider,
+          model:
+            config.provider === "anthropic"
+              ? "claude-3-5-haiku-20241022"
+              : "gpt-4.1-nano",
+          apiKey: process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY,
+        },
+        "You are a profile extraction agent.",
+      );
+      this.profileExtractor = new ProfileExtractor((msg, hist) =>
+        extractionAgent.chat(msg, hist as any),
+      );
+      console.log(
+        "📝 Profile extractor initialized (model:",
+        config.provider === "anthropic" ? "claude-3-5-haiku" : "gpt-4.1-nano",
+        ")",
+      );
+    } catch (err: any) {
+      console.warn("⚠️ Profile extractor init failed:", err?.message);
+      this.profileExtractor = null;
+    }
   }
 
   async runChatTurn(input: ResearchTurnInput): Promise<ResearchTurnResult> {
@@ -151,8 +180,20 @@ export class ResearchOrchestrator {
           modelHistory[modelHistory.length - 1],
         ];
       }
-    } catch (reasoningError) {
-      console.warn("⚠️ OODA reasoning failed (non-fatal):", reasoningError);
+    } catch (reasoningError: any) {
+      console.warn(
+        "⚠️ OODA reasoning failed (non-fatal):",
+        reasoningError?.message || reasoningError,
+      );
+      // Inject minimal thinking context so the LLM isn't flying blind
+      modelHistory = [
+        ...modelHistory.slice(0, -1),
+        {
+          role: "system",
+          content: `[Internal reasoning] Reasoning engine was unavailable. Approach the user's message directly and helpfully. Message: "${input.message.slice(0, 200)}"`,
+        },
+        modelHistory[modelHistory.length - 1],
+      ];
     }
 
     let finalText = "";
@@ -169,7 +210,21 @@ export class ResearchOrchestrator {
       this.pushEvent(events, "synthesis_start", { iteration: iteration + 1 });
 
       const modelStart = performance.now();
-      const response = await this.agent.chatWithTools(modelHistory, tools);
+      let response;
+      try {
+        response = await this.agent.chatWithTools(modelHistory, tools);
+      } catch (llmError: any) {
+        console.warn(
+          `⚠️ LLM call failed on iteration ${iteration + 1}: ${llmError?.message || llmError}`,
+        );
+        // If we have partial tool results, break to forced synthesis
+        if (toolResults.length > 0) {
+          fallbackReason = "llm_call_failed_with_partial_results";
+          break;
+        }
+        // No tool results at all — one more try next iteration, or give up
+        continue;
+      }
       metrics.time_model_ms += performance.now() - modelStart;
       metrics.model_calls++;
 
@@ -205,60 +260,81 @@ export class ResearchOrchestrator {
             parameters: toolCall.parameters,
           });
 
-          try {
-            const toolStart = performance.now();
-            const result = await withTimeout(
-              this.runtime.executeTool(toolName, toolCall.parameters),
-              this.config.toolTimeoutMs,
-              `Tool '${toolName}' timed out after ${this.config.toolTimeoutMs}ms`,
-            );
-            metrics.time_tools_ms += performance.now() - toolStart;
-            toolResults.push({ toolName, result });
+          // Retry once for transient errors (timeout, network)
+          let lastToolError: string | undefined;
+          let toolSucceeded = false;
 
+          for (let attempt = 0; attempt < 2; attempt++) {
             try {
-              convStore.addMessage({
-                userId,
-                conversationId,
-                role: "assistant",
-                content: `[tool: ${toolName}] success`,
-                channel: (input as any).channel || "ws",
+              const toolStart = performance.now();
+              const result = await withTimeout(
+                this.runtime.executeTool(toolName, toolCall.parameters),
+                this.config.toolTimeoutMs,
+                `Tool '${toolName}' timed out after ${this.config.toolTimeoutMs}ms`,
+              );
+              metrics.time_tools_ms += performance.now() - toolStart;
+              toolResults.push({ toolName, result });
+
+              if (this.config.provider === "openai" && toolCall.id) {
+                modelHistory.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id,
+                  content: truncateToolContent(result),
+                });
+              } else {
+                modelHistory.push({
+                  role: "assistant",
+                  content: `Used tool ${toolName}: ${truncateToolContent(result)}`,
+                });
+              }
+
+              this.pushEvent(events, "tool_complete", {
+                name: toolName,
+                success: true,
               });
-            } catch {}
+              toolSucceeded = true;
+              break;
+            } catch (error: any) {
+              lastToolError = error?.message || "Unknown error";
+              const isTransient =
+                /timed? ?out|network|ECONNR|ETIMEDOUT|socket hang up/i.test(
+                  lastToolError!,
+                );
+              if (attempt === 0 && isTransient) {
+                console.warn(
+                  `⚠️ Tool '${toolName}' failed (transient), retrying once...`,
+                );
+                metrics.tool_calls++; // count the retry
+                continue;
+              }
+              break;
+            }
+          }
+
+          if (!toolSucceeded && lastToolError) {
+            metrics.tool_failures++;
+            toolResults.push({ toolName, error: lastToolError });
+
+            // Enriched error context — tell the LLM what to do
+            const enrichedError = `Tool '${toolName}' failed: ${lastToolError}. You can retry it with different parameters, use a different tool, or answer with what you already have.`;
 
             if (this.config.provider === "openai" && toolCall.id) {
               modelHistory.push({
                 role: "tool",
                 tool_call_id: toolCall.id,
-                content: truncateToolContent(result),
+                content: enrichedError,
               });
             } else {
               modelHistory.push({
                 role: "assistant",
-                content: `Used tool ${toolName}: ${truncateToolContent(result)}`,
-              });
-            }
-
-            this.pushEvent(events, "tool_complete", {
-              name: toolName,
-              success: true,
-            });
-          } catch (error: any) {
-            const message = error?.message || "Unknown error";
-            metrics.tool_failures++;
-            toolResults.push({ toolName, error: message });
-
-            if (this.config.provider === "openai" && toolCall.id) {
-              modelHistory.push({
-                role: "tool",
-                tool_call_id: toolCall.id,
-                content: JSON.stringify({ error: message }),
+                content: `[tool error] ${enrichedError}`,
               });
             }
 
             this.pushEvent(events, "tool_complete", {
               name: toolName,
               success: false,
-              error: message,
+              error: lastToolError,
             });
           }
         }
@@ -354,6 +430,19 @@ export class ResearchOrchestrator {
       }),
     );
 
+    // Fire-and-forget: extract profile info from this turn
+    if (this.profileExtractor) {
+      void this.profileExtractor
+        .extract(
+          input.message,
+          responseText,
+          this.runtime.getMarkdownMemory().getProfileStore(),
+        )
+        .catch((err) =>
+          console.warn("⚠️ Profile extraction failed:", err?.message),
+        );
+    }
+
     return {
       response: responseText,
       success: true,
@@ -364,17 +453,25 @@ export class ResearchOrchestrator {
     };
   }
 
-  private getMemoryContext(message: string): string | undefined {
+  private getMemoryContext(_message: string): string | undefined {
     try {
-      const mdMemory = this.runtime.getMarkdownMemory();
-      const contextPkg = mdMemory.getContextAssembler().buildContext({
-        userId: "owner",
-        conversationId: "current",
-        memoryLimit: 8,
-        traitLimit: 20,
-      });
-      const prompt = contextPkg.assembledSystemPrompt;
-      return prompt && prompt.trim().length > 0 ? prompt : undefined;
+      const profileStore = this.runtime.getMarkdownMemory().getProfileStore();
+      const userProfile = profileStore.getUser();
+      const identity = profileStore.getIdentity();
+
+      const sections: string[] = [];
+
+      if (userProfile.trim()) {
+        sections.push("=== ABOUT MY USER ===");
+        sections.push(userProfile);
+      }
+
+      if (identity.trim()) {
+        sections.push("", "=== WHO I AM ===");
+        sections.push(identity);
+      }
+
+      return sections.join("\n");
     } catch {
       return undefined;
     }

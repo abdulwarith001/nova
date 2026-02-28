@@ -1,9 +1,8 @@
 /**
- * context-assembler.ts — Builds the system prompt context from Markdown stores.
+ * context-assembler.ts — Builds the system prompt context from knowledge stores.
  *
- * Replaces the SQLite-backed ContextAssembler.
- * Reads user traits, memories, relationships from Markdown files
- * and assembles them into a context string for the LLM.
+ * Reads user traits, agent traits, preferences, and relationships from
+ * KnowledgeJsonStore and assembles them into a context string for the LLM.
  */
 
 import {
@@ -11,12 +10,9 @@ import {
   type StoredMessage,
 } from "./conversation-store.js";
 import {
-  MarkdownKnowledgeStore,
-  type MemoryItem,
-  type UserTrait,
-  type AgentTrait,
-  type Relationship,
-} from "./knowledge-store.js";
+  KnowledgeJsonStore,
+  type KnowledgeEntry,
+} from "./knowledge-json-store.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -24,10 +20,8 @@ export interface MemoryContextPackage {
   userId: string;
   conversationId: string;
   recentMessages: StoredMessage[];
-  memoryItems: MemoryItem[];
-  userTraits: UserTrait[];
-  agentTraits: AgentTrait[];
-  relationships: Relationship[];
+  userKnowledge: KnowledgeEntry[];
+  agentTraits: KnowledgeEntry[];
   assembledSystemPrompt: string;
 }
 
@@ -36,15 +30,13 @@ export interface MemoryContextPackage {
 export class MarkdownContextAssembler {
   constructor(
     private readonly conversationStore: MarkdownConversationStore,
-    private readonly knowledgeStore: MarkdownKnowledgeStore,
+    private readonly knowledgeStore: KnowledgeJsonStore,
   ) {}
 
   buildContext(input: {
     userId: string;
     conversationId: string;
     messageLimit?: number;
-    memoryLimit?: number;
-    traitLimit?: number;
   }): MemoryContextPackage {
     const recentMessages = this.conversationStore.getRecentMessages({
       userId: input.userId,
@@ -52,45 +44,59 @@ export class MarkdownContextAssembler {
       limit: input.messageLimit || 36,
     });
 
-    const memoryItems = this.knowledgeStore.getTopMemoryItems(
-      input.userId,
-      input.memoryLimit || 16,
-    );
-    const userTraits = this.knowledgeStore.getUserTraits(
-      input.traitLimit || 20,
-    );
-    const agentTraits = this.knowledgeStore.getAgentTraits(16);
-    const relationships = this.knowledgeStore.getRelationships(
-      input.userId,
-      16,
-    );
-
-    // Filter out self-reflection and system entries from user-facing memories
-    const userMemories = memoryItems.filter(
-      (m) =>
-        m.type !== "self_reflection" &&
-        m.type !== "system_audit" &&
-        m.type !== "curiosity_target",
-    );
+    // Get user-related knowledge (user_traits, preferences, important relationships)
+    const userKnowledge = this.knowledgeStore.getUserContext(0.6);
+    const agentTraits = this.knowledgeStore.getAgentTraits();
 
     const sections: string[] = [];
 
     // Section 1: What I know about the user
     sections.push("=== WHAT I KNOW ABOUT MY USER ===");
-    if (userTraits.length > 0) {
-      const grouped = new Map<string, string>();
-      for (const t of userTraits) {
-        grouped.set(t.key, t.value);
+    if (userKnowledge.length > 0) {
+      // Extract name if available
+      const nameEntry = userKnowledge.find(
+        (e) =>
+          e.category === "user_trait" &&
+          e.subject.toLowerCase().includes("name"),
+      );
+      if (nameEntry) {
+        sections.push(`Their name is ${nameEntry.content}.`);
       }
-      const name = grouped.get("name");
-      if (name) {
-        sections.push(`Their name is ${name}.`);
-        grouped.delete("name");
-      }
-      if (grouped.size > 0) {
+
+      // Group by category for organized display
+      const traits = userKnowledge.filter(
+        (e) => e.category === "user_trait" && e !== nameEntry,
+      );
+      const preferences = userKnowledge.filter(
+        (e) => e.category === "preference",
+      );
+      const relationships = userKnowledge.filter(
+        (e) => e.category === "relationship",
+      );
+
+      if (traits.length > 0) {
         sections.push(
           "Things I've learned about them:",
-          ...[...grouped.entries()].map(([k, v]) => `- ${k}: ${v}`),
+          ...traits.map((e) => `- ${e.subject}: ${e.content}`),
+        );
+      }
+
+      if (preferences.length > 0) {
+        sections.push(
+          "",
+          "=== PREFERENCES ===",
+          ...preferences.map((e) => `- ${e.subject}: ${e.content}`),
+        );
+      }
+
+      if (relationships.length > 0) {
+        sections.push(
+          "",
+          "=== PEOPLE & RELATIONSHIPS ===",
+          ...relationships.map(
+            (r) =>
+              `- ${r.subject}: ${r.content} (confidence: ${r.confidence.toFixed(2)})`,
+          ),
         );
       }
     } else {
@@ -99,36 +105,12 @@ export class MarkdownContextAssembler {
       );
     }
 
-    // Section 2: Relationships
-    if (relationships.length > 0) {
-      sections.push(
-        "",
-        "=== PEOPLE & RELATIONSHIPS ===",
-        ...relationships.map(
-          (r) =>
-            `- ${r.subject} ${r.relation} ${r.object} (confidence: ${r.confidence.toFixed(2)})`,
-        ),
-      );
-    }
-
-    // Section 3: Important memories
-    if (userMemories.length > 0) {
-      sections.push(
-        "",
-        "=== THINGS I REMEMBER ===",
-        ...userMemories.map(
-          (m) =>
-            `- [${m.type}] ${m.content.slice(0, 200)} (importance: ${m.importance.toFixed(2)})`,
-        ),
-      );
-    }
-
-    // Section 4: Who I am (learned traits, not soul.md — those come separately)
+    // Section 2: Who I am (learned agent traits)
     if (agentTraits.length > 0) {
       sections.push(
         "",
         "=== WHO I AM ===",
-        ...agentTraits.map((t) => `- ${t.key}: ${t.value}`),
+        ...agentTraits.map((t) => `- ${t.subject}: ${t.content}`),
       );
     }
 
@@ -138,10 +120,8 @@ export class MarkdownContextAssembler {
       userId: input.userId,
       conversationId: input.conversationId,
       recentMessages,
-      memoryItems,
-      userTraits,
+      userKnowledge,
       agentTraits,
-      relationships,
       assembledSystemPrompt,
     };
   }

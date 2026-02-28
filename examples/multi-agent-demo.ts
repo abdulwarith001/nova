@@ -17,7 +17,6 @@ async function main() {
   // Create runtime with all tools
   console.log("1️⃣  Creating runtime...");
   const runtime = await Runtime.create({
-    memoryPath: ":memory:",
     security: {
       sandboxMode: "none",
       allowedTools: [

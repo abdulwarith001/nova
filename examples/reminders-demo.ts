@@ -15,7 +15,6 @@ async function main() {
   // Create runtime
   console.log("1️⃣  Creating runtime with reminder system...");
   const runtime = await Runtime.create({
-    memoryPath: "/tmp/nova-reminders.db",
     security: {
       sandboxMode: "none",
       allowedTools: ["reminder_create"],

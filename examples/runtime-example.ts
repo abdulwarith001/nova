@@ -6,7 +6,6 @@ async function main() {
   // Create runtime
   console.log("Creating runtime...");
   const runtime = await Runtime.create({
-    memoryPath: ":memory:",
     security: {
       sandboxMode: "none",
       allowedTools: ["bash", "read", "write"],
@@ -47,27 +46,24 @@ async function main() {
     console.error("❌ Task failed:", error);
   }
 
-  // Test memory
-  console.log("\n📚 Testing memory store...");
-  const memory = runtime.getMemory();
+  // Test knowledge store
+  console.log("\n📚 Testing knowledge store...");
+  const store = runtime.getMarkdownMemory().getKnowledgeJsonStore();
 
-  await memory.store({
-    id: "mem-1",
-    content: "This is a test memory",
-    timestamp: Date.now(),
-    importance: 0.8,
-    decayRate: 0.1,
+  store.addEntry({
+    category: "fact",
+    subject: "test",
+    content: "This is a test knowledge entry",
     tags: ["test", "example"],
-    source: "example",
-    metadata: { type: "test" },
+    importance: 0.8,
   });
 
-  console.log("✅ Memory stored");
+  console.log("✅ Knowledge stored");
 
-  const results = await memory.search("test", 5);
+  const results = store.search("test");
   console.log("Search results:", results.length);
   if (results.length > 0) {
-    console.log("First result:", results[0].content);
+    console.log("First result:", results[0].entry.content);
   }
 
   // Shutdown

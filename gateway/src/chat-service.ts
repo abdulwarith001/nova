@@ -143,7 +143,7 @@ export class ChatService {
     const now = new Date();
     const timestamp = `Current date and time: ${now.toISOString()}.`;
 
-    // Use soul.md content if available, otherwise fall back to a minimal prompt
+    // Use IDENTITY.md content if available, otherwise fall back to a minimal prompt
     if (this.config.soulContent) {
       return [timestamp, "", this.config.soulContent].join("\n");
     }

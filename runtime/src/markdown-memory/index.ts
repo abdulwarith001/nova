@@ -9,13 +9,6 @@ import { join } from "path";
 import { homedir } from "os";
 import { ensureDir } from "./markdown-store.js";
 import {
-  MarkdownKnowledgeStore,
-  type MemoryItem,
-  type UserTrait,
-  type AgentTrait,
-  type Relationship,
-} from "./knowledge-store.js";
-import {
   MarkdownConversationStore,
   type StoredMessage,
   type ChannelType,
@@ -30,26 +23,40 @@ import {
   MarkdownContextAssembler,
   type MemoryContextPackage,
 } from "./context-assembler.js";
+import {
+  KnowledgeJsonStore,
+  type KnowledgeEntry,
+  type KnowledgeCategory,
+  type KnowledgeSearchResult,
+  type KnowledgeSearchOptions,
+} from "./knowledge-json-store.js";
+import { ProfileStore } from "./profile-store.js";
 
 // Re-export all types
 export type {
-  MemoryItem,
-  UserTrait,
-  AgentTrait,
-  Relationship,
   StoredMessage,
   ChannelType,
   MessageRole,
   LearningJob,
   MemoryJobType,
   MemoryContextPackage,
+  KnowledgeEntry,
+  KnowledgeCategory,
+  KnowledgeSearchResult,
+  KnowledgeSearchOptions,
 };
 
 // Re-export sub-modules
-export { MarkdownKnowledgeStore } from "./knowledge-store.js";
 export { MarkdownConversationStore } from "./conversation-store.js";
 export { MarkdownLearningEngine } from "./learning-engine.js";
 export { MarkdownContextAssembler } from "./context-assembler.js";
+export {
+  KnowledgeJsonStore,
+  VALID_CATEGORIES,
+  normalizeText,
+  textSimilarity,
+} from "./knowledge-json-store.js";
+export { ProfileStore } from "./profile-store.js";
 
 // ── Default paths ───────────────────────────────────────────────────────────
 
@@ -60,20 +67,22 @@ const DEFAULT_MEMORY_DIR = join(homedir(), ".nova", "memory");
 export class MarkdownMemory {
   private readonly memoryDir: string;
   private readonly conversationStore: MarkdownConversationStore;
-  private readonly knowledgeStore: MarkdownKnowledgeStore;
   private readonly contextAssembler: MarkdownContextAssembler;
   private readonly learningEngine: MarkdownLearningEngine;
+  private readonly knowledgeJsonStore: KnowledgeJsonStore;
+  private readonly profileStore: ProfileStore;
 
   constructor(memoryDir?: string) {
     this.memoryDir = memoryDir || DEFAULT_MEMORY_DIR;
     ensureDir(this.memoryDir);
 
     this.conversationStore = new MarkdownConversationStore(this.memoryDir);
-    this.knowledgeStore = new MarkdownKnowledgeStore(this.memoryDir);
     this.learningEngine = new MarkdownLearningEngine(this.memoryDir);
+    this.knowledgeJsonStore = new KnowledgeJsonStore(this.memoryDir);
+    this.profileStore = new ProfileStore(this.memoryDir);
     this.contextAssembler = new MarkdownContextAssembler(
       this.conversationStore,
-      this.knowledgeStore,
+      this.knowledgeJsonStore,
     );
   }
 
@@ -87,16 +96,20 @@ export class MarkdownMemory {
     return this.conversationStore;
   }
 
-  getKnowledgeStore(): MarkdownKnowledgeStore {
-    return this.knowledgeStore;
-  }
-
   getContextAssembler(): MarkdownContextAssembler {
     return this.contextAssembler;
   }
 
   getLearningEngine(): MarkdownLearningEngine {
     return this.learningEngine;
+  }
+
+  getKnowledgeJsonStore(): KnowledgeJsonStore {
+    return this.knowledgeJsonStore;
+  }
+
+  getProfileStore(): ProfileStore {
+    return this.profileStore;
   }
 
   // ── Convenience methods (matching MemoryV2's API) ───────────────────────
@@ -145,8 +158,6 @@ export class MarkdownMemory {
     userId: string;
     conversationId: string;
     messageLimit?: number;
-    memoryLimit?: number;
-    traitLimit?: number;
   }): MemoryContextPackage {
     return this.contextAssembler.buildContext(input);
   }

@@ -22,17 +22,31 @@ function buildRuntimeMock() {
     ensureConversation: vi.fn(),
   };
 
-  const mockKnowledgeStore = {
-    getTopMemoryItems: vi.fn().mockReturnValue([]),
-    getUserTraits: vi.fn().mockReturnValue([]),
-    getRelationships: vi.fn().mockReturnValue([]),
+  const mockKnowledgeJsonStore = {
+    getUserContext: vi.fn().mockReturnValue([]),
+    getAgentTraits: vi.fn().mockReturnValue([]),
+    search: vi.fn().mockReturnValue([]),
+    addEntry: vi.fn(),
+    supersedeEntry: vi.fn(),
+    count: vi.fn().mockReturnValue(0),
+  };
+
+  const mockProfileStore = {
+    getUser: vi
+      .fn()
+      .mockReturnValue("# User Profile\n\n## Basics\n- Name: (unknown)\n"),
+    getIdentity: vi.fn().mockReturnValue("# Nova — Identity\n"),
+    updateUser: vi.fn(),
+    updateIdentity: vi.fn(),
+    getPath: vi.fn().mockReturnValue("/mock/path"),
   };
 
   return {
     getMemory: () => ({ store, search }),
     getMarkdownMemory: () => ({
       getConversationStore: () => mockConvStore,
-      getKnowledgeStore: () => mockKnowledgeStore,
+      getKnowledgeJsonStore: () => mockKnowledgeJsonStore,
+      getProfileStore: () => mockProfileStore,
     }),
     getToolsForAgent: () => [
       {
@@ -160,8 +174,8 @@ describe("ResearchOrchestrator", () => {
       sessionId: "test-session",
     });
 
-    expect(result.response).not.toBe(
-      "I'm sorry, I couldn't complete that request.",
+    expect(result.response).not.toContain(
+      "I wasn't able to fully resolve that request",
     );
     // 3 OODA calls (observe, orient, decide) + 1 forced synthesis = 4
     expect(chat).toHaveBeenCalledTimes(4);

@@ -1,21 +1,18 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
-import { writeFileSync, mkdirSync, existsSync } from "fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import ora from "ora";
-import { execa } from "execa";
 import { daemonCommand } from "./daemon.js";
-import { webAgentCommand } from "./web-agent.js";
 
 export async function initCommand() {
   console.log(chalk.cyan.bold("\n🚀 Welcome to Nova!\n"));
   console.log("Let's set up your AI agent...\n");
 
-  // Check if already initialized
   const configDir = join(homedir(), ".nova");
   const envPath = join(configDir, ".env");
 
+  // Check if already initialized
   if (existsSync(envPath)) {
     const { overwrite } = await inquirer.prompt([
       {
@@ -39,100 +36,81 @@ export async function initCommand() {
       type: "list",
       name: "provider",
       message: "Choose your LLM provider:",
-      choices: ["OpenAI", "Anthropic", "Both"],
+      choices: [
+        { name: "OpenAI", value: "openai" },
+        { name: "Anthropic", value: "anthropic" },
+        { name: "Both", value: "both" },
+      ],
     },
   ]);
 
   // 2. API Keys
   const apiKeys: Record<string, string> = {};
 
-  if (provider === "OpenAI" || provider === "Both") {
+  if (provider === "openai" || provider === "both") {
     const { openaiKey } = await inquirer.prompt([
       {
         type: "password",
         name: "openaiKey",
         message: "Enter your OpenAI API key:",
-        validate: (input) => input.length > 0 || "API key required",
+        validate: (input: string) => input.length > 0 || "API key required",
       },
     ]);
     apiKeys.OPENAI_API_KEY = openaiKey;
   }
 
-  if (provider === "Anthropic" || provider === "Both") {
+  if (provider === "anthropic" || provider === "both") {
     const { anthropicKey } = await inquirer.prompt([
       {
         type: "password",
         name: "anthropicKey",
         message: "Enter your Anthropic API key:",
-        validate: (input) => input.length > 0 || "API key required",
+        validate: (input: string) => input.length > 0 || "API key required",
       },
     ]);
     apiKeys.ANTHROPIC_API_KEY = anthropicKey;
   }
 
-  // 3. Email configuration (optional)
-  const { setupEmail } = await inquirer.prompt([
+  // 3. Choose default model
+  const openaiModels = [
     {
-      type: "confirm",
-      name: "setupEmail",
-      message: "Configure email for notifications?",
-      default: false,
+      name: "gpt-4.1-mini  — fast, affordable, great for most tasks (recommended)",
+      value: "gpt-4.1-mini",
     },
-  ]);
+    { name: "gpt-4.1-nano  — fastest, cheapest", value: "gpt-4.1-nano" },
+    { name: "gpt-4.1       — smartest GPT-4 class", value: "gpt-4.1" },
+    { name: "gpt-4o-mini   — previous gen fast model", value: "gpt-4o-mini" },
+    { name: "gpt-4o        — previous gen flagship", value: "gpt-4o" },
+    { name: "gpt-5         — latest frontier model", value: "gpt-5" },
+    { name: "o3            — reasoning model (advanced)", value: "o3" },
+    { name: "o4-mini       — fast reasoning model", value: "o4-mini" },
+  ];
 
-  let notificationEmail: string | undefined;
-  if (setupEmail) {
-    const emailConfig = await inquirer.prompt([
-      {
-        type: "input",
-        name: "SMTP_HOST",
-        message: "SMTP Host:",
-        default: "smtp.gmail.com",
-      },
-      {
-        type: "input",
-        name: "SMTP_PORT",
-        message: "SMTP Port:",
-        default: "587",
-      },
-      {
-        type: "input",
-        name: "SMTP_USER",
-        message: "Email address:",
-      },
-      {
-        type: "password",
-        name: "SMTP_PASS",
-        message: "Email password/app password:",
-      },
-      {
-        type: "input",
-        name: "notificationEmail",
-        message: "Default notification email (optional):",
-      },
-    ]);
-    Object.assign(apiKeys, emailConfig);
-    if (emailConfig.notificationEmail) {
-      notificationEmail = emailConfig.notificationEmail;
-    }
-  }
+  const anthropicModels = [
+    {
+      name: "claude-sonnet-4-20250514    — latest, best balance (recommended)",
+      value: "claude-sonnet-4-20250514",
+    },
+    {
+      name: "claude-3-7-sonnet-20250219  — strong all-rounder",
+      value: "claude-3-7-sonnet-20250219",
+    },
+    {
+      name: "claude-3-5-haiku-20241022   — fast and affordable",
+      value: "claude-3-5-haiku-20241022",
+    },
+    {
+      name: "claude-3-5-sonnet-20241022  — previous gen flagship",
+      value: "claude-3-5-sonnet-20241022",
+    },
+  ];
 
-  // 4. Default model
   const models =
-    provider === "OpenAI"
-      ? ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"]
-      : provider === "Anthropic"
-        ? [
-            "claude-3-sonnet-20240229",
-            "claude-3-opus-20240229",
-            "claude-3-haiku-20240307",
-          ]
-        : [
-            "gpt-4o-mini",
-            "gpt-4o",
-            "claude-3-sonnet-20240229",
-            "claude-3-opus-20240229",
-          ];
+    provider === "openai"
+      ? openaiModels
+      : provider === "anthropic"
+        ? anthropicModels
+        : [...openaiModels, ...anthropicModels];
 
   const { defaultModel } = await inquirer.prompt([
     {
@@ -143,10 +121,23 @@ export async function initCommand() {
     },
   ]);
 
-  // 5. Create config directory
+  // 4. Create config directory
   mkdirSync(configDir, { recursive: true });
 
-  // 6. Write .env file
+  // 5. Write .env file (preserve existing keys not being overwritten)
+  let existingEnv: Record<string, string> = {};
+  if (existsSync(envPath)) {
+    try {
+      const content = readFileSync(envPath, "utf-8");
+      for (const line of content.split("\n")) {
+        const match = line.match(/^([^=]+)=(.*)$/);
+        if (match) existingEnv[match[1]] = match[2];
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   const envDefaults: Record<string, string> = {
     NOVA_WEB_BACKEND: "auto",
     NOVA_WEB_BACKEND_FALLBACK_ON_ERROR: "true",
@@ -156,23 +147,27 @@ export async function initCommand() {
     NOVA_WEB_EXPOSE_LIVE_VIEW_LINK: "true",
   };
 
-  const envContent = Object.entries({ ...apiKeys, ...envDefaults })
+  const mergedEnv = { ...envDefaults, ...existingEnv, ...apiKeys };
+  const envContent = Object.entries(mergedEnv)
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
   writeFileSync(envPath, envContent);
 
-  // 7. Write config.json
+  // Determine the actual provider string for config
+  const defaultProvider =
+    provider === "both"
+      ? defaultModel.startsWith("claude")
+        ? "anthropic"
+        : "openai"
+      : provider;
+
+  // 6. Write config.json
   const configPath = join(configDir, "config.json");
   const config = {
     defaultModel,
-    defaultProvider: provider.toLowerCase(),
-    memoryPath: join(configDir, "memory.db"),
-    daemonPort: 3000,
+    defaultProvider,
     logLevel: "info",
-    notificationEmail,
     telegramEnabled: false,
-    telegramOwnerUserId: undefined,
-    telegramOwnerChatId: undefined,
   };
   writeFileSync(configPath, JSON.stringify(config, null, 2));
 
@@ -180,125 +175,46 @@ export async function initCommand() {
   console.log(chalk.gray(`   Config: ${configPath}`));
   console.log(chalk.gray(`   Env: ${envPath}\n`));
 
-  // 8. Install browser binaries for web-assist tools
-  await installChromiumBrowser();
-
-  // 9. Test connection (simulated for now)
-  const spinner = ora("Testing connection to LLM...").start();
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-  spinner.succeed("Connection verified");
-
-  // 10. Optional web auth profile bootstrap during init
-  let daemonStartedDuringInit = false;
-  const { setupWebProfile } = await inquirer.prompt([
-    {
-      type: "confirm",
-      name: "setupWebProfile",
-      message: "Set up authenticated web profile now? (Google/site login)",
-      default: false,
-    },
-  ]);
-
-  if (setupWebProfile) {
-    const { profileId, startUrl } = await inquirer.prompt([
-      {
-        type: "input",
-        name: "profileId",
-        message: "Profile ID:",
-        default: "default",
-      },
-      {
-        type: "input",
-        name: "startUrl",
-        message: "Start URL for login:",
-        default: "https://accounts.google.com",
-      },
-    ]);
-
-    try {
-      await daemonCommand("start");
-      daemonStartedDuringInit = true;
-      await webAgentCommand("bootstrap", profileId, undefined, { startUrl });
-    } catch (error: any) {
-      console.log(chalk.yellow("\n⚠️  Could not complete web profile bootstrap during init."));
-      console.log(chalk.gray(`   ${String(error?.message || error)}`));
-      console.log(
-        chalk.cyan(
-          `   Run later: nova web bootstrap ${String(profileId || "default")} --start-url ${String(startUrl || "https://accounts.google.com")}\n`,
-        ),
-      );
-    }
-  }
-
-  // 11. Prompt to start daemon
-  if (daemonStartedDuringInit) {
-    console.log(chalk.gray("Daemon is already running from profile bootstrap.\n"));
-  } else {
-    const { startDaemon } = await inquirer.prompt([
+  // 7. Prompt to start daemon
+  const { startDaemon } = await inquirer.prompt([
     {
       type: "confirm",
       name: "startDaemon",
       message: "Start Nova daemon now?",
       default: true,
     },
-    ]);
+  ]);
 
-    if (startDaemon) {
-      console.log(chalk.cyan("\nStarting daemon..."));
-      try {
-        await daemonCommand("start");
-      } catch {
-        const spinner2 = ora("Initializing background service...").start();
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        spinner2.succeed("Daemon started successfully");
-      }
+  if (startDaemon) {
+    console.log(chalk.cyan("\nStarting daemon..."));
+    try {
+      await daemonCommand("start");
+    } catch {
+      console.log(chalk.yellow("⚠️  Could not start daemon automatically."));
+      console.log(chalk.gray("   Run: nova daemon start\n"));
     }
   }
 
   console.log(chalk.cyan.bold("\n🎉 Setup complete!\n"));
-  console.log("Try these commands:");
-  console.log(chalk.gray("  nova chat              # Start chatting"));
-  console.log(chalk.gray("  nova web bootstrap     # Set up authenticated web profile"));
-  console.log(chalk.gray('  nova run "your task"   # Run a quick task'));
-  console.log(chalk.gray("  nova daemon status     # Check daemon status\n"));
-}
-
-async function installChromiumBrowser() {
-  if (process.env.NOVA_SKIP_BROWSER_INSTALL === "true") {
-    console.log(
-      chalk.yellow(
-        "⚠️  Skipping Chromium install because NOVA_SKIP_BROWSER_INSTALL=true",
-      ),
-    );
-    console.log(chalk.gray("   Run later: npx playwright install chromium\n"));
-    return;
-  }
-
-  const spinner = ora(
-    "Installing Chromium for browser-based web-assist tools...",
-  ).start();
-
-  try {
-    await execa(
-      "npm",
-      ["exec", "--yes", "playwright", "install", "chromium"],
-      {
-        stdio: "pipe",
-      },
-    );
-    spinner.succeed("Chromium installed");
-  } catch (error: any) {
-    spinner.warn("Could not auto-install Chromium");
-    const details =
-      error?.shortMessage || error?.stderr || error?.stdout || error?.message;
-    if (details) {
-      console.log(chalk.gray(`   ${String(details).split("\n")[0]}`));
-    }
-    console.log(
-      chalk.yellow(
-        "   Browser web-assist may fail until Chromium is installed manually.",
-      ),
-    );
-    console.log(chalk.cyan("   Run: npx playwright install chromium\n"));
-  }
+  console.log("Get started:");
+  console.log(
+    chalk.gray("  nova chat              # Start chatting via terminal"),
+  );
+  console.log(chalk.gray("  nova daemon status     # Check daemon status"));
+  console.log(
+    chalk.gray(
+      "  nova config set defaultModel <model>  # Change model anytime\n",
+    ),
+  );
+  console.log("Set up communication channels:");
+  console.log(chalk.gray("  nova telegram setup    # Connect Telegram bot"));
+  console.log(
+    chalk.gray(
+      "  nova google setup      # Connect Google Workspace (Gmail, Calendar, Drive)",
+    ),
+  );
+  console.log(chalk.gray("  nova brave setup       # Set up Brave Search API"));
+  console.log(
+    chalk.gray("  nova web bootstrap     # Set up authenticated web profile\n"),
+  );
 }

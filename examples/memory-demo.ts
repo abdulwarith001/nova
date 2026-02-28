@@ -1,5 +1,4 @@
 import { Runtime } from "../runtime/src/index.js";
-import { AutonomousAgent } from "../agent/src/autonomous.js";
 
 async function main() {
   console.log("🧠 Nova Memory Management Demo\n");
@@ -15,158 +14,133 @@ async function main() {
   }
 
   // Create runtime with persistent memory
-  console.log("1️⃣  Creating runtime with memory...");
+  console.log("1️⃣  Creating runtime with knowledge store...");
   const runtime = await Runtime.create({
-    memoryPath: "./nova-memory.db", // Persistent database
     security: {
       sandboxMode: "none",
       allowedTools: ["bash", "read", "write"],
+      deniedTools: [],
     },
     executor: {
       maxParallel: 4,
       defaultTimeoutMs: 30000,
     },
   });
-  console.log("   ✅ Runtime created with persistent memory\n");
+  console.log("   ✅ Runtime created with knowledge store\n");
 
-  const memory = runtime.getMemory();
+  const store = runtime.getMarkdownMemory().getKnowledgeJsonStore();
 
-  // Show initial profiles
-  console.log("2️⃣  Initial Agent Profile:");
-  const agentProfile = memory.getAgentProfile();
-  console.log(`   Version: ${agentProfile.version}`);
-  console.log(`   Capabilities: ${agentProfile.capabilities.length}`);
-  console.log(`   Limitations: ${agentProfile.limitations.length}\n`);
+  // Store knowledge about the user
+  console.log("2️⃣  Storing user knowledge...");
 
-  console.log("3️⃣  Initial User Profile:");
-  const userProfile = memory.getUserProfile();
-  console.log(`   Name: ${userProfile.name || "Unknown"}`);
-  console.log(`   Goals: ${userProfile.goals.length}`);
-  console.log(
-    `   Preferences: ${Object.keys(userProfile.preferences).length}\n`,
-  );
-
-  // Simulate learning about the user
-  console.log("4️⃣  Simulating user interaction...");
-  await memory.updateUserProfile({
-    name: "Abdulwarith",
-    workStyle: "Focused and efficient",
-    goals: ["Build autonomous AI agents", "Ship production-ready software"],
-  });
-  console.log("   ✅ User profile updated\n");
-
-  // Store some memories
-  console.log("5️⃣  Storing memories...");
-
-  await memory.store({
-    id: `mem-${Date.now()}-1`,
-    content: "User prefers TypeScript over Rust for rapid prototyping",
-    timestamp: Date.now(),
-    importance: 0.8,
-    decayRate: 0.05,
-    tags: ["preference", "technology"],
-    source: "conversation",
-    category: "user",
-    metadata: { topic: "programming" },
+  store.addEntry({
+    category: "user_trait",
+    subject: "name",
+    content: "Abdulwarith",
+    importance: 0.95,
+    confidence: 1.0,
+    source: "user_explicit",
   });
 
-  await memory.store({
-    id: `mem-${Date.now()}-2`,
-    content: "Successfully implemented browser automation with Playwright",
-    timestamp: Date.now(),
-    importance: 0.9,
-    decayRate: 0.1,
-    tags: ["capability", "achievement"],
-    source: "task-execution",
-    category: "self",
-    metadata: { feature: "browser-automation" },
-  });
-
-  await memory.store({
-    id: `mem-${Date.now()}-3`,
-    content: "Completed file operations task in under 3 seconds",
-    timestamp: Date.now(),
+  store.addEntry({
+    category: "user_trait",
+    subject: "work_style",
+    content: "Focused and efficient",
     importance: 0.7,
-    decayRate: 0.1,
-    tags: ["task", "performance"],
-    source: "execution",
-    category: "task",
-    metadata: { duration: 2847 },
+    confidence: 0.9,
+    source: "conversation",
   });
 
-  console.log("   ✅ Stored 3 memories\n");
+  store.addEntry({
+    category: "preference",
+    subject: "programming_language",
+    content: "User prefers TypeScript over Rust for rapid prototyping",
+    tags: ["preference", "technology"],
+    importance: 0.8,
+    source: "conversation",
+  });
 
-  // Search memories
-  console.log("6️⃣  Searching memories...");
-  const results = await memory.search("browser automation", { limit: 5 });
-  console.log(`   Found ${results.length} relevant memories:`);
+  store.addEntry({
+    category: "fact",
+    subject: "browser_automation",
+    content: "Successfully implemented browser automation with Playwright",
+    tags: ["capability", "achievement"],
+    importance: 0.9,
+    source: "system",
+  });
+
+  store.addEntry({
+    category: "agent_trait",
+    subject: "capability",
+    content: "Browser automation with Playwright",
+    tags: ["capability"],
+    importance: 0.8,
+    source: "system",
+  });
+
+  console.log("   ✅ Stored 5 knowledge entries\n");
+
+  // Search knowledge
+  console.log("3️⃣  Searching knowledge...");
+  const results = store.search("browser automation");
+  console.log(`   Found ${results.length} relevant entries:`);
   for (const result of results) {
-    console.log(`   - ${result.content} (${result.category})`);
+    console.log(
+      `   - [${result.entry.category}] ${result.entry.content} (score: ${result.score.toFixed(2)})`,
+    );
   }
   console.log();
 
-  // Get recent memories by category
-  console.log("7️⃣  Recent user-related memories:");
-  const userMemories = await memory.getRecent("user", 3);
-  for (const mem of userMemories) {
-    console.log(`   - ${mem.content}`);
+  // Get essentials for system prompt
+  console.log("4️⃣  Getting user essentials for system prompt...");
+  const essentials = store.getEssentials(0.7);
+  console.log(`   ${essentials.length} essential traits:`);
+  for (const e of essentials) {
+    console.log(`   - ${e.subject}: ${e.content}`);
+  }
+  console.log();
+
+  // Get agent traits
+  console.log("5️⃣  Getting agent traits...");
+  const agentTraits = store.getAgentTraits();
+  console.log(`   ${agentTraits.length} agent traits:`);
+  for (const t of agentTraits) {
+    console.log(`   - ${t.subject}: ${t.content}`);
   }
   console.log();
 
   // Build context
-  console.log("8️⃣  Building context for agent...");
-  const context = await memory.buildContext("browser automation");
+  console.log("6️⃣  Building assembled context for LLM...");
+  const ctx = runtime.getMarkdownMemory().buildContext({
+    userId: "demo-user",
+    conversationId: "demo-conv",
+  });
   console.log("   Context preview:");
-  console.log(context.split("\n").slice(0, 15).join("\n"));
+  console.log(ctx.assembledSystemPrompt.split("\n").slice(0, 15).join("\n"));
   console.log("   ...\n");
 
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-
-  // Create autonomous agent with memory
-  console.log("9️⃣  Creating autonomous agent with memory context...");
-  const agent = new AutonomousAgent(runtime, {
-    provider: "openai",
-    model: "gpt-4o-mini",
-    temperature: 0.7,
-    maxIterations: 10,
-    enableMemoryContext: true, // Enable memory integration
+  // Test deduplication
+  console.log("7️⃣  Testing fuzzy deduplication...");
+  store.addEntry({
+    category: "preference",
+    subject: "programming_language",
+    content: "The user enjoys TypeScript for rapid prototyping over Rust",
+    importance: 0.7,
+    source: "conversation",
   });
-  console.log("   ✅ Agent created with memory enabled\n");
-
-  // Execute a task that benefits from context
-  console.log("🔟 Executing task with memory context...");
-  const task =
-    "Create a summary file about what you know about me and what youve accomplished.";
-
-  try {
-    const result = await agent.execute(task);
-    console.log(`\n✅ Final result: ${result}\n`);
-  } catch (error) {
-    console.error(`\n❌ Task failed: ${error}\n`);
-  }
-
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-
-  // Show updated profiles
-  console.log("1️⃣1️⃣  Final User Profile:");
-  const finalUserProfile = memory.getUserProfile();
-  console.log(`   Name: ${finalUserProfile.name}`);
-  console.log(`   Work Style: ${finalUserProfile.workStyle}`);
-  console.log(`   Goals:`);
-  for (const goal of finalUserProfile.goals) {
-    console.log(`     - ${goal}`);
-  }
-  console.log();
+  console.log(
+    `   Active entries after near-duplicate: ${store.count(true)} (should NOT increase)\n`,
+  );
 
   // Summary
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
   console.log("🎉 Memory Management Demo Complete!\n");
   console.log("Nova successfully:");
-  console.log("  ✅ Learned about the user (name, work style, goals)");
-  console.log("  ✅ Stored memories in different categories");
-  console.log("  ✅ Retrieved relevant context");
-  console.log("  ✅ Built context for task execution");
-  console.log("  ✅ Executed tasks with memory awareness");
-  console.log("\n🧠 Nova now has contextual memory!");
+  console.log("  ✅ Stored user traits, preferences, and facts");
+  console.log("  ✅ Searched knowledge with ranked scoring");
+  console.log("  ✅ Built assembled context for LLM");
+  console.log("  ✅ Detected and merged near-duplicate entries");
+  console.log("\n🧠 Nova now has contextual knowledge!");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
   // Shutdown

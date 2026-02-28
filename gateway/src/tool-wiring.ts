@@ -36,6 +36,40 @@ export async function wireSkillTools(runtime: Runtime): Promise<void> {
 }
 
 /**
+ * Wire the update_profile tool to the ProfileStore.
+ */
+export function wireProfileTools(runtime: Runtime): void {
+  const store = runtime.getMarkdownMemory().getProfileStore();
+  const tool = runtime.getTools().get("update_profile");
+  if (tool) {
+    tool.execute = async (params: any) => {
+      const file = String(params.file || "").trim();
+      const content = String(params.content || "").trim();
+
+      if (file !== "user" && file !== "identity") {
+        return { success: false, error: "file must be 'user' or 'identity'" };
+      }
+      if (!content) {
+        return { success: false, error: "content must not be empty" };
+      }
+
+      if (file === "user") {
+        store.updateUser(content);
+      } else {
+        store.updateIdentity(content);
+      }
+
+      return {
+        success: true,
+        message: `Updated ${file} profile`,
+        path: store.getPath(file),
+      };
+    };
+    console.log("📝 Wired update_profile tool");
+  }
+}
+
+/**
  * Wire the browse and scrape tools (they need the Agent reference for vision).
  */
 export async function wireBrowseTools(
