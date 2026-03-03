@@ -1,21 +1,21 @@
 /**
- * scheduler/tools.ts — Agent-facing tools for managing schedules.
+ * tasks/tools.ts — Agent-facing tools for managing tasks.
  *
- * Tools: schedule_create, schedule_list, schedule_cancel, schedule_update
+ * Tools: task_create, task_list, task_cancel, task_update
  */
 
-import type { SchedulerStore } from "../../../runtime/src/scheduler-store.js";
+import type { TaskStore } from "../../../runtime/src/task-store.js";
 
-export function registerSchedulerTools(
+export function registerTaskTools(
   registry: { register(tool: any): void },
-  store: SchedulerStore,
+  store: TaskStore,
 ): void {
-  // ── schedule_create ─────────────────────────────────────────────────────
+  // ── task_create ─────────────────────────────────────────────────────
 
   registry.register({
-    name: "schedule_create",
+    name: "task_create",
     description:
-      "Create a reminder, recurring task, or scheduled agent action. Use this when the user says 'remind me', 'every day/hour', 'in X minutes do Y', or any scheduling request. You MUST provide delayMs (milliseconds from now until trigger). Simple conversions: 1 minute = 60000, 1 hour = 3600000, 1 day = 86400000. If the user does not specify a time, ASK them when they want to be reminded — never guess.",
+      "Create a reminder, recurring task, or scheduled agent action. Use this when the user says 'remind me', 'every day/hour', 'in X minutes do Y', or any scheduling request. Provide EITHER triggerAt (ISO datetime for a specific time) OR delayMinutes (minutes from now). If the user does not specify a time, ASK them — never guess.",
     category: "data",
     parametersSchema: {
       type: "object",
@@ -30,10 +30,15 @@ export function registerSchedulerTools(
           type: "string",
           description: "What to remind or do (human-readable)",
         },
-        delayMs: {
+        delayMinutes: {
           type: "number",
           description:
-            "Delay in milliseconds from NOW until trigger. Examples: 5 min = 300000, 30 min = 1800000, 1 hour = 3600000, 2 hours = 7200000, 1 day = 86400000. ALWAYS use this — never pass an absolute timestamp.",
+            "Delay in minutes from NOW until trigger. Use for relative delays: 5 min = 5, 30 min = 30, 1 hour = 60, 2 hours = 120. Either this OR triggerAt is required.",
+        },
+        triggerAt: {
+          type: "string",
+          description:
+            "ISO 8601 datetime string for when to trigger (e.g. '2026-03-04T09:00:00'). Use for specific times like 'at 9 AM', 'tomorrow at noon'. Use the timezone from your system prompt. Either this OR delayMinutes is required.",
         },
         action: {
           type: "string",
@@ -51,7 +56,7 @@ export function registerSchedulerTools(
             "Optional time of day for recurring items: '09:00', '14:30'. Used with schedule to align triggers.",
         },
       },
-      required: ["kind", "message", "delayMs"],
+      required: ["kind", "message"],
     },
     permissions: [],
     execute: async (params: any) => {
@@ -60,17 +65,41 @@ export function registerSchedulerTools(
         | "recurring"
         | "task";
       const message = String(params.message || "");
-      const delayMs = Number(params.delayMs);
+      const delayMinutes =
+        params.delayMinutes != null ? Number(params.delayMinutes) : null;
+      const triggerAt = params.triggerAt ? String(params.triggerAt) : null;
 
       if (!message) throw new Error("Message is required");
-      if (!delayMs || !Number.isFinite(delayMs) || delayMs < 0) {
+      if (delayMinutes == null && !triggerAt) {
         throw new Error(
-          "delayMs must be a positive number (milliseconds from now). Examples: 5 min = 300000, 1 hour = 3600000. If the user did not specify a time, ask them when they want to be reminded.",
+          "Provide either delayMinutes (e.g. 5, 60, 1440) or triggerAt (e.g. '2026-03-04T09:00:00'). If the user did not specify a time, ask them.",
         );
       }
 
+      let nextRun: number;
       const now = Date.now();
-      const nextRun = now + delayMs;
+
+      if (triggerAt) {
+        const parsed = new Date(triggerAt).getTime();
+        if (!Number.isFinite(parsed)) {
+          throw new Error(
+            `Invalid triggerAt datetime: "${triggerAt}". Use ISO 8601 format like '2026-03-04T09:00:00'.`,
+          );
+        }
+        if (parsed <= now) {
+          throw new Error(
+            `triggerAt is in the past. Current time: ${new Date(now).toISOString()}. Provide a future datetime.`,
+          );
+        }
+        nextRun = parsed;
+      } else {
+        if (!Number.isFinite(delayMinutes!) || delayMinutes! < 0) {
+          throw new Error(
+            "delayMinutes must be a positive number (minutes from now). Examples: 5 min = 5, 1 hour = 60.",
+          );
+        }
+        nextRun = now + delayMinutes! * 60_000;
+      }
 
       const item = store.create({
         kind,
@@ -94,12 +123,12 @@ export function registerSchedulerTools(
     },
   });
 
-  // ── schedule_list ───────────────────────────────────────────────────────
+  // ── task_list ───────────────────────────────────────────────────────
 
   registry.register({
-    name: "schedule_list",
+    name: "task_list",
     description:
-      "List scheduled items (reminders, recurring tasks, agent actions). Filter by status or kind.",
+      "List tasks (reminders, recurring, agent actions). Filter by status or kind.",
     category: "data",
     parametersSchema: {
       type: "object",
@@ -146,19 +175,19 @@ export function registerSchedulerTools(
     },
   });
 
-  // ── schedule_cancel ─────────────────────────────────────────────────────
+  // ── task_cancel ─────────────────────────────────────────────────────
 
   registry.register({
-    name: "schedule_cancel",
+    name: "task_cancel",
     description:
-      "Cancel a scheduled item by ID. Reminders, tasks, and recurring items can all be cancelled.",
+      "Cancel a task by ID. Reminders, tasks, and recurring items can all be cancelled.",
     category: "data",
     parametersSchema: {
       type: "object",
       properties: {
         id: {
           type: "string",
-          description: "The ID of the scheduled item to cancel",
+          description: "The ID of the task to cancel",
         },
       },
       required: ["id"],
@@ -170,30 +199,35 @@ export function registerSchedulerTools(
 
       const cancelled = store.cancel(id);
       if (!cancelled) {
-        return { success: false, error: "Item not found or already cancelled" };
+        return { success: false, error: "Task not found or already cancelled" };
       }
       return { success: true, id };
     },
   });
 
-  // ── schedule_update ─────────────────────────────────────────────────────
+  // ── task_update ─────────────────────────────────────────────────────
 
   registry.register({
-    name: "schedule_update",
+    name: "task_update",
     description:
-      "Update a scheduled item: snooze (set new delay), change message, change interval, pause/resume. Use this for 'snooze', 'reschedule', 'change to every X', or 'update' requests. ALWAYS use this instead of creating a new schedule when the user wants to modify an existing one.",
+      "Update a task: snooze (set new delay), change message, change interval, pause/resume. Use this for 'snooze', 'reschedule', 'change to every X', or 'update' requests. ALWAYS use this instead of creating a new task when the user wants to modify an existing one.",
     category: "data",
     parametersSchema: {
       type: "object",
       properties: {
         id: {
           type: "string",
-          description: "The ID of the scheduled item to update",
+          description: "The ID of the task to update",
         },
-        delayMs: {
+        delayMinutes: {
           type: "number",
           description:
-            "New delay in milliseconds from now for snooze/reschedule. 15 min = 900000, 1 hour = 3600000.",
+            "New delay in minutes from now for snooze/reschedule. 15 min = 15, 1 hour = 60.",
+        },
+        triggerAt: {
+          type: "string",
+          description:
+            "ISO 8601 datetime for new trigger time (e.g. '2026-03-04T14:00:00'). Alternative to delayMinutes.",
         },
         message: {
           type: "string",
@@ -223,12 +257,26 @@ export function registerSchedulerTools(
       if (!id) throw new Error("ID is required");
 
       const changes: Record<string, any> = {};
-      if (params.delayMs) {
-        const delayMs = Number(params.delayMs);
-        if (!Number.isFinite(delayMs) || delayMs < 0) {
-          throw new Error("delayMs must be a positive number");
+      if (params.triggerAt) {
+        const parsed = new Date(String(params.triggerAt)).getTime();
+        if (!Number.isFinite(parsed)) {
+          throw new Error(
+            `Invalid triggerAt datetime. Use ISO 8601 format like '2026-03-04T09:00:00'.`,
+          );
         }
-        changes.nextRun = Date.now() + delayMs;
+        if (parsed <= Date.now()) {
+          throw new Error(
+            "triggerAt is in the past. Provide a future datetime.",
+          );
+        }
+        changes.nextRun = parsed;
+        changes.status = "active";
+      } else if (params.delayMinutes) {
+        const delayMinutes = Number(params.delayMinutes);
+        if (!Number.isFinite(delayMinutes) || delayMinutes < 0) {
+          throw new Error("delayMinutes must be a positive number");
+        }
+        changes.nextRun = Date.now() + delayMinutes * 60_000;
         changes.status = "active"; // Re-activate if snoozed
       }
       if (params.message) changes.message = String(params.message);
@@ -238,13 +286,13 @@ export function registerSchedulerTools(
 
       if (Object.keys(changes).length === 0) {
         throw new Error(
-          "Provide at least one field to update: delayMs, message, action, schedule, or status",
+          "Provide at least one field to update: delayMinutes, message, action, schedule, or status",
         );
       }
 
       const updated = store.update(id, changes);
       if (!updated) {
-        return { success: false, error: "Item not found" };
+        return { success: false, error: "Task not found" };
       }
 
       return {

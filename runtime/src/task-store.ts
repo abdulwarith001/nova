@@ -1,8 +1,8 @@
 /**
- * scheduler-store.ts — JSON-file-backed storage for scheduled items.
+ * task-store.ts — JSON-file-backed storage for tasks.
  *
  * Stores reminders, recurring tasks, and deferred agent actions
- * in ~/.nova/schedules.json.
+ * in ~/.nova/tasks.json.
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
@@ -12,12 +12,12 @@ import { randomUUID } from "crypto";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export type ScheduleKind = "reminder" | "recurring" | "task";
-export type ScheduleStatus = "active" | "triggered" | "cancelled" | "paused";
+export type TaskKind = "reminder" | "recurring" | "task";
+export type TaskStatus = "active" | "triggered" | "cancelled" | "paused";
 
-export interface ScheduledItem {
+export interface TaskItem {
   id: string;
-  kind: ScheduleKind;
+  kind: TaskKind;
   message: string;
   /** Optional agent instruction — sent through chatService for 'task' and 'recurring' kinds */
   action?: string;
@@ -29,7 +29,7 @@ export interface ScheduledItem {
   nextRun: number;
   /** Last trigger time */
   lastRun?: number;
-  status: ScheduleStatus;
+  status: TaskStatus;
   /** Delivery target (e.g. Telegram chat ID) */
   chatId?: string;
   /** Extra context (JSON-serializable) */
@@ -37,8 +37,8 @@ export interface ScheduledItem {
   createdAt: number;
 }
 
-export interface CreateScheduleInput {
-  kind: ScheduleKind;
+export interface CreateTaskInput {
+  kind: TaskKind;
   message: string;
   /** Unix timestamp ms for when to first trigger */
   nextRun: number;
@@ -49,12 +49,12 @@ export interface CreateScheduleInput {
   context?: Record<string, unknown>;
 }
 
-export interface ScheduleFilter {
-  status?: ScheduleStatus;
-  kind?: ScheduleKind;
+export interface TaskFilter {
+  status?: TaskStatus;
+  kind?: TaskKind;
 }
 
-export interface ScheduleStats {
+export interface TaskStats {
   active: number;
   triggered: number;
   cancelled: number;
@@ -64,23 +64,23 @@ export interface ScheduleStats {
 
 // ── Store ───────────────────────────────────────────────────────────────────
 
-export class SchedulerStore {
+export class TaskStore {
   private readonly filePath: string;
-  private items: ScheduledItem[] = [];
+  private items: TaskItem[] = [];
 
   constructor(novaDir?: string) {
     const dir = novaDir || join(homedir(), ".nova");
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    this.filePath = join(dir, "schedules.json");
+    this.filePath = join(dir, "tasks.json");
     this.load();
   }
 
   // ── CRUD ────────────────────────────────────────────────────────────────
 
-  create(input: CreateScheduleInput): ScheduledItem {
-    const item: ScheduledItem = {
+  create(input: CreateTaskInput): TaskItem {
+    const item: TaskItem = {
       id: randomUUID(),
       kind: input.kind,
       message: input.message,
@@ -99,7 +99,7 @@ export class SchedulerStore {
     return item;
   }
 
-  list(filter?: ScheduleFilter): ScheduledItem[] {
+  list(filter?: TaskFilter): TaskItem[] {
     this.load();
     let result = [...this.items];
     if (filter?.status) {
@@ -111,7 +111,7 @@ export class SchedulerStore {
     return result.sort((a, b) => a.nextRun - b.nextRun);
   }
 
-  getById(id: string): ScheduledItem | undefined {
+  getById(id: string): TaskItem | undefined {
     this.load();
     return this.items.find((item) => item.id === id);
   }
@@ -128,11 +128,11 @@ export class SchedulerStore {
     id: string,
     changes: Partial<
       Pick<
-        ScheduledItem,
+        TaskItem,
         "nextRun" | "message" | "status" | "action" | "schedule" | "timeOfDay"
       >
     >,
-  ): ScheduledItem | null {
+  ): TaskItem | null {
     const item = this.items.find((i) => i.id === id);
     if (!item) return null;
     Object.assign(item, changes);
@@ -143,17 +143,28 @@ export class SchedulerStore {
   // ── Scheduling ──────────────────────────────────────────────────────────
 
   /** Get all items that are due (active + nextRun <= now). */
-  getDue(now = Date.now()): ScheduledItem[] {
+  getDue(now = Date.now()): TaskItem[] {
     this.load();
     return this.items.filter(
       (item) => item.status === "active" && item.nextRun <= now,
     );
   }
 
-  /** Mark a one-shot item as triggered and remove it (it's done). */
+  /** Mark a one-shot item as triggered and remove it (it's done).
+   *  Safety: refuses to delete recurring items — use advanceRecurring instead. */
   markTriggered(id: string): void {
     const index = this.items.findIndex((i) => i.id === id);
     if (index === -1) return;
+
+    // Guard: never delete recurring items
+    const item = this.items[index];
+    if (item.kind === "recurring") {
+      console.warn(
+        `⚠️ markTriggered called on recurring item "${item.message}" — skipping delete, use advanceRecurring instead`,
+      );
+      return;
+    }
+
     this.items.splice(index, 1);
     this.save();
   }
@@ -171,9 +182,9 @@ export class SchedulerStore {
 
   // ── Stats ───────────────────────────────────────────────────────────────
 
-  getStats(): ScheduleStats {
+  getStats(): TaskStats {
     this.load();
-    const counts: ScheduleStats = {
+    const counts: TaskStats = {
       active: 0,
       triggered: 0,
       cancelled: 0,
@@ -182,42 +193,10 @@ export class SchedulerStore {
     };
     for (const item of this.items) {
       if (item.status in counts) {
-        counts[item.status as keyof Omit<ScheduleStats, "total">]++;
+        counts[item.status as keyof Omit<TaskStats, "total">]++;
       }
     }
     return counts;
-  }
-
-  // ── Migration ───────────────────────────────────────────────────────────
-
-  /** Import heartbeat.md tasks as recurring items. */
-  migrateFromHeartbeat(
-    tasks: Array<{
-      name: string;
-      interval: string;
-      time?: string;
-      message: string;
-    }>,
-  ): ScheduledItem[] {
-    const migrated: ScheduledItem[] = [];
-    for (const task of tasks) {
-      // Skip if already migrated (same message exists)
-      const exists = this.items.some(
-        (item) => item.message === task.message && item.kind === "recurring",
-      );
-      if (exists) continue;
-
-      const intervalMs = this.parseIntervalMs(task.interval);
-      const item = this.create({
-        kind: "recurring",
-        message: task.message,
-        schedule: task.interval,
-        timeOfDay: task.time,
-        nextRun: Date.now() + intervalMs,
-      });
-      migrated.push(item);
-    }
-    return migrated;
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
@@ -260,7 +239,7 @@ export class SchedulerStore {
       const raw = readFileSync(this.filePath, "utf-8");
       this.items = JSON.parse(raw);
     } catch {
-      console.warn("⚠️ Failed to parse schedules.json, starting fresh");
+      console.warn("⚠️ Failed to parse tasks.json, starting fresh");
       this.items = [];
     }
   }

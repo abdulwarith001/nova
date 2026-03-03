@@ -142,15 +142,15 @@ program
   });
 
 program
-  .command("reminders")
-  .alias("schedule")
-  .description("View and manage scheduled items (reminders, recurring tasks)")
-  .option("--cancel <id>", "Cancel a scheduled item by ID")
-  .option("--select", "Interactively select an item to cancel")
-  .option("--all", "Show all items (including triggered and cancelled)")
+  .command("tasks")
+  .alias("task")
+  .description("View and manage tasks (reminders, recurring tasks)")
+  .option("--cancel <id>", "Cancel a task by ID")
+  .option("--select", "Interactively select a task to cancel")
+  .option("--all", "Show all tasks (including triggered and cancelled)")
   .action(async (options) => {
-    const { remindersCommand } = await import("./commands/reminders.js");
-    return remindersCommand(options);
+    const { tasksCommand } = await import("./commands/tasks.js");
+    return tasksCommand(options);
   });
 
 // Parse arguments

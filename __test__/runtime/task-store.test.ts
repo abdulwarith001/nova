@@ -2,30 +2,30 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { SchedulerStore } from "../../runtime/src/scheduler-store";
-import { SchedulerEngine } from "../../runtime/src/scheduler-engine";
+import { TaskStore } from "../../runtime/src/task-store";
+import { TaskEngine } from "../../runtime/src/task-engine";
 
-describe("SchedulerStore", () => {
+describe("TaskStore", () => {
   let tmpDir: string;
-  let store: SchedulerStore;
+  let store: TaskStore;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "nova-test-scheduler-"));
-    store = new SchedulerStore(tmpDir);
+    tmpDir = mkdtempSync(join(tmpdir(), "nova-test-task-"));
+    store = new TaskStore(tmpDir);
   });
 
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("creates schedules.json on first write", () => {
+  it("creates tasks.json on first write", () => {
     store.create({
       kind: "reminder",
       message: "Test reminder",
       nextRun: Date.now() + 60_000,
     });
 
-    expect(existsSync(join(tmpDir, "schedules.json"))).toBe(true);
+    expect(existsSync(join(tmpDir, "tasks.json"))).toBe(true);
   });
 
   it("creates and lists items", () => {
@@ -120,6 +120,21 @@ describe("SchedulerStore", () => {
     expect(store.getById(item.id)).toBeUndefined(); // fully removed
   });
 
+  it("refuses to delete recurring items via markTriggered", () => {
+    const past = Date.now() - 60_000;
+    const item = store.create({
+      kind: "recurring",
+      message: "Keep alive",
+      nextRun: past,
+      schedule: "6h",
+    });
+
+    store.markTriggered(item.id);
+    // Recurring items should NOT be deleted
+    expect(store.getById(item.id)).toBeDefined();
+    expect(store.getById(item.id)?.kind).toBe("recurring");
+  });
+
   it("advances recurring items", () => {
     const past = Date.now() - 60_000;
     const item = store.create({
@@ -161,29 +176,6 @@ describe("SchedulerStore", () => {
     expect(stats.total).toBe(1);
   });
 
-  it("migrates heartbeat tasks", () => {
-    const migrated = store.migrateFromHeartbeat([
-      { name: "Check-in", interval: "6h", message: "Check in with user" },
-      {
-        name: "Daily Summary",
-        interval: "24h",
-        time: "09:00",
-        message: "Send daily summary",
-      },
-    ]);
-
-    expect(migrated.length).toBe(2);
-    expect(migrated[0].kind).toBe("recurring");
-    expect(migrated[0].schedule).toBe("6h");
-    expect(migrated[1].timeOfDay).toBe("09:00");
-
-    // Re-migration should skip existing
-    const again = store.migrateFromHeartbeat([
-      { name: "Check-in", interval: "6h", message: "Check in with user" },
-    ]);
-    expect(again.length).toBe(0);
-  });
-
   it("persists to disk and reloads", () => {
     store.create({
       kind: "reminder",
@@ -192,22 +184,22 @@ describe("SchedulerStore", () => {
     });
 
     // Create fresh store from same dir
-    const store2 = new SchedulerStore(tmpDir);
+    const store2 = new TaskStore(tmpDir);
     const items = store2.list();
     expect(items.length).toBe(1);
     expect(items[0].message).toBe("Persist me");
   });
 });
 
-describe("SchedulerEngine", () => {
+describe("TaskEngine", () => {
   let tmpDir: string;
-  let store: SchedulerStore;
-  let engine: SchedulerEngine;
+  let store: TaskStore;
+  let engine: TaskEngine;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "nova-test-engine-"));
-    store = new SchedulerStore(tmpDir);
-    engine = new SchedulerEngine(store, 999_999); // long interval to prevent auto-tick
+    store = new TaskStore(tmpDir);
+    engine = new TaskEngine(store, 999_999); // long interval to prevent auto-tick
   });
 
   afterEach(() => {

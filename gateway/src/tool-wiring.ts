@@ -36,19 +36,18 @@ export async function wireSkillTools(
     console.warn("⚠️ Failed to load google-workspace skill:", err.message);
   }
 
-  // Scheduler skill (reminders, recurring tasks, agent actions)
+  // Task skill (reminders, recurring tasks, agent actions)
   try {
-    const { registerSchedulerTools } =
-      await import("../../skills/core/scheduler/tools.js");
-    const { SchedulerStore } =
-      await import("../../runtime/src/scheduler-store.js");
-    const store = new SchedulerStore();
-    registerSchedulerTools(runtime.getTools(), store);
+    const { registerTaskTools } =
+      await import("../../skills/core/tasks/tools.js");
+    const { TaskStore } = await import("../../runtime/src/task-store.js");
+    const store = new TaskStore();
+    registerTaskTools(runtime.getTools(), store);
     console.log(
-      "⏰ Wired scheduler tools (schedule_create, schedule_list, schedule_cancel, schedule_update)",
+      "⏰ Wired task tools (task_create, task_list, task_cancel, task_update)",
     );
   } catch (err: any) {
-    console.warn("⚠️ Failed to load scheduler skill:", err.message);
+    console.warn("⚠️ Failed to load task skill:", err.message);
   }
 
   // Image generation skill (DALL-E)

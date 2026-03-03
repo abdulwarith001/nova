@@ -176,7 +176,15 @@ export class ChatService {
 
   private buildInitialSystemPrompt(channel?: string): string {
     const now = new Date();
-    const timestamp = `Current date and time: ${now.toISOString()}.`;
+    // Local ISO string with timezone offset (e.g., "2026-03-04T00:14:00+01:00")
+    const tzOffset = -now.getTimezoneOffset();
+    const sign = tzOffset >= 0 ? "+" : "-";
+    const absOffset = Math.abs(tzOffset);
+    const hh = String(Math.floor(absOffset / 60)).padStart(2, "0");
+    const mm = String(absOffset % 60).padStart(2, "0");
+    const localISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}${sign}${hh}:${mm}`;
+    const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const timestamp = `Current date/time: ${localISO} (${tzName}). Always use this timezone for scheduling.`;
 
     const parts: string[] = [timestamp, ""];
 

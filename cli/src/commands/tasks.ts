@@ -4,18 +4,18 @@ import WebSocket from "ws";
 import { loadConfig } from "../utils/config.js";
 import readline from "readline";
 
-export async function remindersCommand(options: {
+export async function tasksCommand(options: {
   cancel?: string;
   select?: boolean;
   all?: boolean;
 }) {
   if (options.cancel) {
-    return cancelReminder(options.cancel);
+    return cancelTask(options.cancel);
   }
 
-  console.log(chalk.cyan.bold("\n📋 Pending Reminders\n"));
+  console.log(chalk.cyan.bold("\n📋 Pending Tasks\n"));
 
-  const spinner = ora("Fetching reminders...").start();
+  const spinner = ora("Fetching tasks...").start();
 
   try {
     const config = loadConfig();
@@ -27,7 +27,7 @@ export async function remindersCommand(options: {
       setTimeout(() => reject(new Error("Connection timeout")), 5000);
     });
 
-    // Request reminders list
+    // Request tasks list
     const request = (payload: any) =>
       new Promise<any>((resolve, reject) => {
         const timeout = setTimeout(
@@ -47,21 +47,21 @@ export async function remindersCommand(options: {
         ws.send(JSON.stringify(payload));
       });
 
-    const remindersResult = await request({
-      type: "list_reminders",
+    const tasksResult = await request({
+      type: "list_tasks",
       status: options.all ? undefined : "active",
     });
 
     spinner.stop();
 
-    const reminders = remindersResult.reminders || [];
+    const tasks = tasksResult.tasks || [];
 
-    if (reminders.length === 0) {
-      console.log(chalk.yellow("No pending reminders\n"));
+    if (tasks.length === 0) {
+      console.log(chalk.yellow("No pending tasks\n"));
     } else {
-      console.log(chalk.gray(`Found ${reminders.length} item(s):\n`));
+      console.log(chalk.gray(`Found ${tasks.length} item(s):\n`));
 
-      reminders.forEach((item: any, index: number) => {
+      tasks.forEach((item: any, index: number) => {
         const time = new Date(
           item.nextRun || item.sendAt || item.triggerTime,
         ).toLocaleString();
@@ -75,25 +75,25 @@ export async function remindersCommand(options: {
       });
     }
 
-    if (options.select && reminders.length > 0) {
-      const picked = await promptForIndex(reminders.length);
+    if (options.select && tasks.length > 0) {
+      const picked = await promptForIndex(tasks.length);
       if (picked !== null) {
-        const target = reminders[picked];
+        const target = tasks[picked];
         ws.close();
-        return cancelReminder(target.id);
+        return cancelTask(target.id);
       }
     }
 
     ws.close();
   } catch (error: any) {
-    spinner.fail("Failed to fetch reminders");
+    spinner.fail("Failed to fetch tasks");
     console.error(chalk.red("\nError:"), error.message);
     process.exit(1);
   }
 }
 
-async function cancelReminder(id: string) {
-  console.log(chalk.cyan(`\n🚫 Cancelling reminder: ${id}\n`));
+async function cancelTask(id: string) {
+  console.log(chalk.cyan(`\n🚫 Cancelling task: ${id}\n`));
 
   const spinner = ora("Cancelling...").start();
 
@@ -109,7 +109,7 @@ async function cancelReminder(id: string) {
 
     ws.send(
       JSON.stringify({
-        type: "cancel_reminder",
+        type: "cancel_task",
         id,
       }),
     );
@@ -131,15 +131,15 @@ async function cancelReminder(id: string) {
     });
 
     if (result.success) {
-      spinner.succeed("Reminder cancelled");
+      spinner.succeed("Task cancelled");
     } else {
-      spinner.fail("Failed to cancel reminder");
+      spinner.fail("Failed to cancel task");
     }
 
     console.log();
     ws.close();
   } catch (error: any) {
-    spinner.fail("Failed to cancel reminder");
+    spinner.fail("Failed to cancel task");
     console.error(chalk.red("\nError:"), error.message);
     process.exit(1);
   }
@@ -153,7 +153,7 @@ function promptForIndex(max: number): Promise<number | null> {
 
   return new Promise((resolve) => {
     rl.question(
-      chalk.cyan(`Select reminder to cancel (1-${max}, or empty to skip): `),
+      chalk.cyan(`Select task to cancel (1-${max}, or empty to skip): `),
       (answer) => {
         rl.close();
         const trimmed = answer.trim();
