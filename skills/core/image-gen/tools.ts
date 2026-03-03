@@ -9,7 +9,7 @@ export function registerImageGenTools(registry: {
   registry.register({
     name: "generate_image",
     description:
-      "Generate an image from a text prompt using DALL-E. Returns the image which will be sent to the user automatically. Use when the user asks to create, draw, or generate an image/picture/visual.",
+      "Generate an image from a text prompt using GPT Image. Returns the image which will be sent to the user automatically. Use when the user asks to create, draw, or generate an image/picture/visual.",
     category: "media",
     parametersSchema: {
       type: "object",
@@ -21,9 +21,15 @@ export function registerImageGenTools(registry: {
         },
         size: {
           type: "string",
-          enum: ["1024x1024", "1024x1792", "1792x1024"],
+          enum: ["1024x1024", "1024x1536", "1536x1024"],
           description:
-            "Image dimensions. Square (1024x1024) is default. Use 1024x1792 for portrait, 1792x1024 for landscape.",
+            "Image dimensions. Square (1024x1024) is default. Use 1024x1536 for portrait, 1536x1024 for landscape.",
+        },
+        quality: {
+          type: "string",
+          enum: ["low", "medium", "high", "auto"],
+          description:
+            "Image quality. 'auto' is default. 'high' for best quality, 'low' for fastest generation.",
         },
       },
       required: ["prompt"],
@@ -41,16 +47,18 @@ export function registerImageGenTools(registry: {
 
       const client = new OpenAI({ apiKey: openaiKey });
       const size =
-        (params.size as "1024x1024" | "1024x1792" | "1792x1024") || "1024x1024";
+        (params.size as "1024x1024" | "1024x1536" | "1536x1024") || "1024x1024";
+      const quality =
+        (params.quality as "low" | "medium" | "high" | "auto") || "auto";
 
       console.log(`🎨 Generating image: "${prompt.slice(0, 80)}..."`);
 
       const response = await client.images.generate({
-        model: "dall-e-3",
+        model: "gpt-image-1",
         prompt,
         n: 1,
         size,
-        response_format: "b64_json",
+        quality,
       });
 
       const imageData = response.data?.[0];
@@ -65,8 +73,8 @@ export function registerImageGenTools(registry: {
 
       return {
         success: true,
-        revisedPrompt: imageData.revised_prompt || prompt,
         size,
+        quality,
         delivered: true, // Image queued for delivery to user
       };
     },
