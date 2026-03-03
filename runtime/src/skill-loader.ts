@@ -272,6 +272,14 @@ export class SkillLoader {
       "• When you have enough info, CREATE the schedule immediately. Don't ask 'would you like me to...' — just do it.",
       "• Keep confirmations to ONE short sentence: 'Done! I'll remind you at 9 AM daily.'",
       "",
+      "=== IMAGE RULES ===",
+      "• When the user asks to create/draw/generate an image, use generate_image immediately with a detailed prompt.",
+      "• The image will be sent to the user automatically — just confirm what you created.",
+      "• When the user sends you a photo, you can see and analyze it. Describe what you see or answer questions about it.",
+      "• You can understand images sent to you (screenshots, photos, documents, etc).",
+      "• When the user asks for a SCREENSHOT of a website, use browse(url, sendScreenshot: true). The screenshot will be sent automatically.",
+      "• Do NOT set sendScreenshot: true unless the user explicitly asks for a screenshot.",
+      "",
       "If you need a capability, search your skills. Don't guess — request the skill by name.",
     ].join("\n");
   }

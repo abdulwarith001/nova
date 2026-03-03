@@ -1,6 +1,7 @@
 import type { Browser } from "playwright";
 import { chromium } from "playwright";
 import type { Agent } from "../../../agent/src/index.ts";
+import { pushPendingImage } from "../pending-images.js";
 
 let sharedBrowser: Browser | null = null;
 
@@ -35,8 +36,13 @@ const VISION_PROMPT = [
  * Browse a URL using a real browser.
  * Takes a screenshot and analyzes it via a vision sub-agent.
  * Returns text-only results — the main agent never sees raw images.
+ * If sendScreenshot is true, the screenshot is also queued for delivery to the user.
  */
-export async function browse(url: string, agent: Agent): Promise<BrowseResult> {
+export async function browse(
+  url: string,
+  agent: Agent,
+  sendScreenshot = false,
+): Promise<BrowseResult> {
   const normalizedUrl = url.startsWith("http") ? url : `https://${url}`;
 
   const browser = await getSharedBrowser();
@@ -109,6 +115,14 @@ export async function browse(url: string, agent: Agent): Promise<BrowseResult> {
       console.warn("Vision sub-agent failed:", visionError);
       visionAnalysis =
         "Vision analysis unavailable. Use the visible text and headings below.";
+    }
+
+    // Only queue the screenshot if user explicitly asked for it
+    if (sendScreenshot) {
+      pushPendingImage({
+        imageBase64: screenshotBase64,
+        caption: `📸 ${domData.title || normalizedUrl}`,
+      });
     }
 
     return {

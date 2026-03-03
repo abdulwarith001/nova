@@ -50,6 +50,16 @@ export async function wireSkillTools(
   } catch (err: any) {
     console.warn("⚠️ Failed to load scheduler skill:", err.message);
   }
+
+  // Image generation skill (DALL-E)
+  try {
+    const { registerImageGenTools } =
+      await import("../../skills/core/image-gen/tools.js");
+    registerImageGenTools(runtime.getTools());
+    console.log("🎨 Wired image generation tools (generate_image)");
+  } catch (err: any) {
+    console.warn("⚠️ Failed to load image-gen skill:", err.message);
+  }
 }
 
 /**

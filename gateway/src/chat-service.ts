@@ -23,6 +23,7 @@ export interface ChatTurnInput {
   sessionId: string;
   historyKey: string;
   channel: "ws" | "telegram";
+  imageBase64?: string;
 }
 
 export interface ChatTurnOutput {
@@ -54,11 +55,44 @@ export class ChatService {
 
   async runChatTurn(input: ChatTurnInput): Promise<ChatTurnOutput> {
     const userMessage = String(input.message || "").trim();
-    if (!userMessage) {
+    if (!userMessage && !input.imageBase64) {
       return { response: "", success: true };
     }
 
     const history = this.getOrCreateHistory(input.historyKey, input.channel);
+
+    // Vision path: image present → use chatWithVision directly
+    if (input.imageBase64) {
+      const prompt = userMessage || "Describe this image in detail.";
+      try {
+        const visionResponse = await this.agent.chatWithVision(
+          input.imageBase64,
+          prompt,
+        );
+        // Store text summary in history (not the huge base64)
+        const nextHistory = trimConversationHistory(
+          [
+            ...history,
+            { role: "user", content: `[Image sent] ${prompt}` },
+            { role: "assistant", content: visionResponse },
+          ],
+          this.historyLimit,
+        );
+        this.histories.set(input.historyKey, nextHistory);
+
+        return {
+          response: visionResponse,
+          success: true,
+        };
+      } catch (err: any) {
+        console.error("Vision analysis failed:", err?.message);
+        return {
+          response:
+            "Sorry, I couldn't analyze that image. Try sending it again.",
+          success: false,
+        };
+      }
+    }
 
     if (this.config.useResearchOrchestratorV2) {
       const result = await this.orchestrator.runChatTurn({

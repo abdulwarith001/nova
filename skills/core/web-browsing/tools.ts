@@ -106,6 +106,11 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
           type: "string",
           description: "URL to browse (will add https:// if missing)",
         },
+        sendScreenshot: {
+          type: "boolean",
+          description:
+            "Set to true to send the screenshot to the user. Only use when the user explicitly asks for a screenshot.",
+        },
       },
       required: ["url"],
     },
@@ -119,7 +124,7 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
     execute: async (params) => {
       const url = String(params.url || "").trim();
       if (!url) throw new Error("Missing url parameter");
-      return await browse(url, agent);
+      return await browse(url, agent, params.sendScreenshot === true);
     },
   });
 
