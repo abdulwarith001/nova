@@ -23,7 +23,7 @@ export function loadConfig(): NovaConfig {
       defaultModel: "gpt-4o-mini",
       defaultProvider: "openai",
       memoryPath: join(homedir(), ".nova", "memory.db"),
-      daemonPort: 3000,
+      daemonPort: 18789,
       logLevel: "info",
       notificationEmail: undefined,
       telegramEnabled: false,

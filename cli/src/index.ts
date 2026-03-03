@@ -141,5 +141,17 @@ program
     return skillCommand(action);
   });
 
+program
+  .command("reminders")
+  .alias("schedule")
+  .description("View and manage scheduled items (reminders, recurring tasks)")
+  .option("--cancel <id>", "Cancel a scheduled item by ID")
+  .option("--select", "Interactively select an item to cancel")
+  .option("--all", "Show all items (including triggered and cancelled)")
+  .action(async (options) => {
+    const { remindersCommand } = await import("./commands/reminders.js");
+    return remindersCommand(options);
+  });
+
 // Parse arguments
 program.parse();

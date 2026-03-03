@@ -35,6 +35,21 @@ export async function wireSkillTools(
   } catch (err: any) {
     console.warn("⚠️ Failed to load google-workspace skill:", err.message);
   }
+
+  // Scheduler skill (reminders, recurring tasks, agent actions)
+  try {
+    const { registerSchedulerTools } =
+      await import("../../skills/core/scheduler/tools.js");
+    const { SchedulerStore } =
+      await import("../../runtime/src/scheduler-store.js");
+    const store = new SchedulerStore();
+    registerSchedulerTools(runtime.getTools(), store);
+    console.log(
+      "⏰ Wired scheduler tools (schedule_create, schedule_list, schedule_cancel, schedule_update)",
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Failed to load scheduler skill:", err.message);
+  }
 }
 
 /**

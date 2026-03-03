@@ -19,9 +19,7 @@ export async function remindersCommand(options: {
 
   try {
     const config = loadConfig();
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${config.daemonPort || 3000}/ws`,
-    );
+    const ws = new WebSocket(`ws://127.0.0.1:${config.daemonPort || 18789}/ws`);
 
     await new Promise((resolve, reject) => {
       ws.on("open", resolve);
@@ -51,7 +49,7 @@ export async function remindersCommand(options: {
 
     const remindersResult = await request({
       type: "list_reminders",
-      status: options.all ? undefined : "scheduled",
+      status: options.all ? undefined : "active",
     });
 
     spinner.stop();
@@ -101,7 +99,7 @@ async function cancelReminder(id: string) {
 
   try {
     const config = loadConfig();
-    const ws = new WebSocket(`ws://127.0.0.1:${config.daemonPort || 3000}/ws`);
+    const ws = new WebSocket(`ws://127.0.0.1:${config.daemonPort || 18789}/ws`);
 
     await new Promise((resolve, reject) => {
       ws.on("open", resolve);
@@ -146,8 +144,6 @@ async function cancelReminder(id: string) {
     process.exit(1);
   }
 }
-
- 
 
 function promptForIndex(max: number): Promise<number | null> {
   const rl = readline.createInterface({

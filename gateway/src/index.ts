@@ -6,7 +6,9 @@ import { Runtime } from "../../runtime/src/index.js";
 import path from "path";
 import { homedir } from "os";
 import { ensureEnvLoaded, loadNovaConfig } from "../../runtime/src/config.js";
-import { HeartbeatEngine } from "../../runtime/src/heartbeat.js";
+import { SchedulerStore } from "../../runtime/src/scheduler-store.js";
+import { SchedulerEngine } from "../../runtime/src/scheduler-engine.js";
+
 import { ResearchOrchestrator } from "./research-orchestrator.js";
 import { ChatService } from "./chat-service.js";
 import { TelegramChannel } from "./channels/telegram.js";
@@ -278,6 +280,45 @@ async function start() {
               break;
             }
 
+            case "list_reminders": {
+              try {
+                const store = scheduler.getStore();
+                const status = data.status || "active";
+                const items = store.list({ status });
+                connection.send(
+                  JSON.stringify({
+                    type: "result",
+                    reminders: items.map((item) => ({
+                      id: item.id,
+                      kind: item.kind,
+                      message: item.message,
+                      nextRun: item.nextRun,
+                      status: item.status,
+                      schedule: item.schedule,
+                    })),
+                  }),
+                );
+              } catch (error: any) {
+                connection.send(
+                  JSON.stringify({ type: "error", message: error.message }),
+                );
+              }
+              break;
+            }
+
+            case "cancel_reminder": {
+              try {
+                const store = scheduler.getStore();
+                const success = store.cancel(String(data.id || ""));
+                connection.send(JSON.stringify({ type: "result", success }));
+              } catch (error: any) {
+                connection.send(
+                  JSON.stringify({ type: "error", message: error.message }),
+                );
+              }
+              break;
+            }
+
             default:
               connection.send(
                 JSON.stringify({
@@ -331,42 +372,69 @@ async function start() {
     );
   });
 
-  // Start heartbeat engine
-  const heartbeat = new HeartbeatEngine();
-  heartbeat.onTick(async (tick) => {
-    console.log(`💓 Heartbeat task "${tick.task.name}": ${tick.task.message}`);
+  // Start scheduler engine
+  const schedulerStore = new SchedulerStore();
 
-    // Route proactive messages through the chat pipeline
+  const scheduler = new SchedulerEngine(schedulerStore);
+  scheduler.onTick(async (tick) => {
+    const label =
+      tick.item.kind === "reminder"
+        ? "🔔"
+        : tick.item.kind === "recurring"
+          ? "🔄"
+          : "📋";
+    console.log(`${label} Scheduler triggered: "${tick.item.message}"`);
+
     try {
-      const result = await chatService.runChatTurn({
-        message: tick.task.message,
-        sessionId: `heartbeat:${tick.task.name}`,
-        historyKey: `heartbeat:${tick.task.name}`,
-        channel: "telegram",
-      });
+      const isConnected = telegramChannel.getStatus().connected;
+      const ownerChatId = telegramChannel.getStatus().ownerChatId;
 
-      if (result.response && telegramChannel.getStatus().connected) {
-        const status = telegramChannel.getStatus();
-        if (status.ownerChatId) {
+      if (tick.item.kind === "reminder") {
+        // Reminders: route through LLM so delivery feels natural and fun
+        const prompt = `You have a reminder to deliver to the user. Tell them in a fun, friendly, natural way — like a personal assistant nudging them. Keep it short (1-2 sentences). The reminder is: "${tick.item.message}"`;
+        const result = await chatService.runChatTurn({
+          message: prompt,
+          sessionId: `scheduler:${tick.item.id}`,
+          historyKey: `scheduler:reminder:${tick.item.id}`,
+          channel: "telegram",
+        });
+
+        if (result.response && isConnected && ownerChatId) {
           await telegramChannel.sendProactiveMessage(
-            status.ownerChatId,
+            ownerChatId,
+            `🔔 ${result.response}`,
+          );
+        }
+      } else {
+        // Tasks & recurring: route through chat pipeline (agent acts on it)
+        const prompt = tick.item.action || tick.item.message;
+        const result = await chatService.runChatTurn({
+          message: prompt,
+          sessionId: `scheduler:${tick.item.id}`,
+          historyKey: `scheduler:${tick.item.kind}:${tick.item.id}`,
+          channel: "telegram",
+        });
+
+        if (result.response && isConnected && ownerChatId) {
+          await telegramChannel.sendProactiveMessage(
+            ownerChatId,
             result.response,
           );
         }
       }
     } catch (err: any) {
       console.warn(
-        `⚠️ Heartbeat delivery failed for "${tick.task.name}":`,
+        `⚠️ Scheduler delivery failed for "${tick.item.message}":`,
         err?.message,
       );
     }
   });
-  heartbeat.start();
+  scheduler.start();
 
   // Graceful shutdown
   process.on("SIGTERM", async () => {
     console.log("\n🛑 Shutting down gateway...");
-    heartbeat.stop();
+    scheduler.stop();
     await telegramChannel.stop();
     await runtime.shutdown();
     await app.close();
