@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { existsSync, readFileSync, readdirSync } from "fs";
+import { existsSync, readdirSync } from "fs";
 import { homedir } from "os";
 import { join, basename } from "path";
 import { MarkdownMemory } from "../../../runtime/src/markdown-memory/index.js";
@@ -12,8 +12,8 @@ const MEMORY_DIR = join(NOVA_DIR, "memory");
  *
  * Actions:
  *   status   — Show memory system overview
- *   user     — Show user traits
- *   agent    — Show agent identity traits
+ *   user     — Show user profile (USER.md)
+ *   agent    — Show agent identity (IDENTITY.md)
  *   list     — List conversations, knowledge, or relationships
  *   search   — Search knowledge items
  *   export   — Export all memory as JSON
@@ -31,10 +31,10 @@ export async function memoryCommand(
         showStatus(memory);
         break;
       case "user":
-        showUserTraits(memory);
+        showUserProfile(memory);
         break;
       case "agent":
-        showAgentTraits(memory);
+        showAgentIdentity(memory);
         break;
       case "list":
         showList(memory, args[0] || "conversations");
@@ -62,50 +62,35 @@ function showStatus(memory: MarkdownMemory): void {
     ? readdirSync(convDir).filter((f) => f.endsWith(".md")).length
     : 0;
 
-  const traits = memory.getKnowledgeStore().getUserTraits();
-  const items = memory.getKnowledgeStore().getTopMemoryItems("owner", 100);
-  const relationships = memory.getKnowledgeStore().getRelationships("owner");
-  const agentTraits = memory.getKnowledgeStore().getAgentTraits();
+  const store = memory.getKnowledgeJsonStore();
+  const knowledgeCount = store.count();
+  const agentTraits = store.getAgentTraits();
+  const userContext = store.getUserContext();
   const pendingJobs = memory.getLearningEngine().listPendingJobs();
 
-  console.log(`  Conversations:    ${chalk.white(convCount)}`);
-  console.log(`  User traits:      ${chalk.white(traits.length)}`);
-  console.log(`  Knowledge items:  ${chalk.white(items.length)}`);
-  console.log(`  Relationships:    ${chalk.white(relationships.length)}`);
-  console.log(`  Agent traits:     ${chalk.white(agentTraits.length)}`);
-  console.log(`  Pending jobs:     ${chalk.white(pendingJobs.length)}`);
-  console.log(`  Storage:          ${chalk.dim(MEMORY_DIR)}`);
+  console.log(`  Conversations:      ${chalk.white(convCount)}`);
+  console.log(`  Knowledge entries:  ${chalk.white(knowledgeCount)}`);
+  console.log(`  User context items: ${chalk.white(userContext.length)}`);
+  console.log(`  Agent traits:       ${chalk.white(agentTraits.length)}`);
+  console.log(`  Pending jobs:       ${chalk.white(pendingJobs.length)}`);
+  console.log(`  Storage:            ${chalk.dim(MEMORY_DIR)}`);
   console.log();
 }
 
-function showUserTraits(memory: MarkdownMemory): void {
-  const traits = memory.getKnowledgeStore().getUserTraits();
+function showUserProfile(memory: MarkdownMemory): void {
+  const profileStore = memory.getProfileStore();
+  const userContent = profileStore.getUser();
 
-  if (traits.length === 0) {
-    console.log(chalk.yellow("No user traits stored yet."));
-    return;
-  }
-
-  console.log(chalk.cyan(`\n👤 User Traits (${traits.length}):\n`));
-  for (const trait of traits) {
-    console.log(`  ${chalk.white(trait.key)}: ${trait.value}`);
-  }
-  console.log();
+  console.log(chalk.cyan("\n👤 User Profile (USER.md):\n"));
+  console.log(userContent);
 }
 
-function showAgentTraits(memory: MarkdownMemory): void {
-  const traits = memory.getKnowledgeStore().getAgentTraits();
+function showAgentIdentity(memory: MarkdownMemory): void {
+  const profileStore = memory.getProfileStore();
+  const identityContent = profileStore.getIdentity();
 
-  if (traits.length === 0) {
-    console.log(chalk.yellow("No agent traits stored yet."));
-    return;
-  }
-
-  console.log(chalk.cyan(`\n🤖 Agent Traits (${traits.length}):\n`));
-  for (const trait of traits) {
-    console.log(`  ${chalk.white(trait.key)}: ${trait.value}`);
-  }
-  console.log();
+  console.log(chalk.cyan("\n🤖 Agent Identity (IDENTITY.md):\n"));
+  console.log(identityContent);
 }
 
 function showList(memory: MarkdownMemory, entity: string): void {
@@ -131,7 +116,8 @@ function showList(memory: MarkdownMemory, entity: string): void {
     }
     case "knowledge":
     case "memories": {
-      const items = memory.getKnowledgeStore().getTopMemoryItems("owner", 20);
+      const store = memory.getKnowledgeJsonStore();
+      const items = store.getAllActive().slice(0, 20);
       if (items.length === 0) {
         console.log(chalk.yellow("No knowledge items yet."));
         return;
@@ -140,7 +126,7 @@ function showList(memory: MarkdownMemory, entity: string): void {
       for (const item of items) {
         const imp = (item.importance * 100).toFixed(0);
         console.log(
-          `  ${chalk.dim("•")} [${item.type}] ${item.content.slice(0, 100)} ${chalk.dim(`(${imp}%)`)}`,
+          `  ${chalk.dim("•")} [${item.category}] ${item.content.slice(0, 100)} ${chalk.dim(`(${imp}%)`)}`,
         );
       }
       console.log();
@@ -148,7 +134,10 @@ function showList(memory: MarkdownMemory, entity: string): void {
     }
     case "relationships":
     case "rels": {
-      const rels = memory.getKnowledgeStore().getRelationships("owner");
+      const store = memory.getKnowledgeJsonStore();
+      const rels = store
+        .search("", { category: "relationship" })
+        .map((r) => r.entry);
       if (rels.length === 0) {
         console.log(chalk.yellow("No relationships yet."));
         return;
@@ -156,7 +145,7 @@ function showList(memory: MarkdownMemory, entity: string): void {
       console.log(chalk.cyan(`\n🔗 Relationships (${rels.length}):\n`));
       for (const rel of rels) {
         console.log(
-          `  ${chalk.white(rel.subject)} ${chalk.dim("→")} ${rel.relation} ${chalk.dim("→")} ${chalk.white(rel.object)}`,
+          `  ${chalk.white(rel.subject)} ${chalk.dim("→")} ${rel.content.slice(0, 80)}`,
         );
       }
       console.log();
@@ -176,35 +165,36 @@ function searchMemory(memory: MarkdownMemory, query: string): void {
     return;
   }
 
-  const items = memory.getKnowledgeStore().getTopMemoryItems("owner", 50);
-  const queryLower = query.toLowerCase();
-  const matches = items.filter((item) =>
-    item.content.toLowerCase().includes(queryLower),
-  );
+  const store = memory.getKnowledgeJsonStore();
+  const results = store.search(query, { limit: 10 });
 
-  if (matches.length === 0) {
+  if (results.length === 0) {
     console.log(chalk.yellow(`No results for "${query}"`));
     return;
   }
 
   console.log(
-    chalk.cyan(`\n🔍 Search Results for "${query}" (${matches.length}):\n`),
+    chalk.cyan(`\n🔍 Search Results for "${query}" (${results.length}):\n`),
   );
-  for (const item of matches.slice(0, 10)) {
+  for (const result of results) {
+    const score = (result.score * 100).toFixed(0);
     console.log(
-      `  ${chalk.dim("•")} [${item.type}] ${item.content.slice(0, 120)}`,
+      `  ${chalk.dim("•")} [${result.entry.category}] ${result.entry.content.slice(0, 120)} ${chalk.dim(`(${score}%)`)}`,
     );
   }
   console.log();
 }
 
 function exportMemory(memory: MarkdownMemory): void {
+  const store = memory.getKnowledgeJsonStore();
+  const profileStore = memory.getProfileStore();
+
   const data = {
     exportedAt: new Date().toISOString(),
-    userTraits: memory.getKnowledgeStore().getUserTraits(),
-    agentTraits: memory.getKnowledgeStore().getAgentTraits(),
-    knowledgeItems: memory.getKnowledgeStore().getTopMemoryItems("owner", 1000),
-    relationships: memory.getKnowledgeStore().getRelationships("owner"),
+    userProfile: profileStore.getUser(),
+    agentIdentity: profileStore.getIdentity(),
+    knowledgeEntries: store.getAllActive(),
+    agentTraits: store.getAgentTraits(),
   };
 
   console.log(JSON.stringify(data, null, 2));
@@ -215,8 +205,8 @@ function showHelp(): void {
   console.log("Usage: nova memory <action> [args]\n");
   console.log("Actions:");
   console.log("  status                   — Memory system overview");
-  console.log("  user                     — Show user traits");
-  console.log("  agent                    — Show agent identity traits");
+  console.log("  user                     — Show user profile (USER.md)");
+  console.log("  agent                    — Show agent identity (IDENTITY.md)");
   console.log(
     "  list <entity>            — List conversations|knowledge|relationships",
   );

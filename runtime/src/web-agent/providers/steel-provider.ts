@@ -9,6 +9,7 @@ import {
 } from "../browser-provider.js";
 import { RemoteContextStore } from "../remote-context-store.js";
 import { WebTelemetry } from "../telemetry.js";
+import { safeReadJson, extractErrorMessage, waitMs } from "./provider-utils.js";
 
 interface SteelSessionResponse {
   id?: string;
@@ -99,12 +100,17 @@ export class SteelProvider implements BrowserProvider {
         }),
       "create remote session",
     );
-    const remoteSessionId = String(created.id || created.sessionId || "").trim();
+    const remoteSessionId = String(
+      created.id || created.sessionId || "",
+    ).trim();
     if (!remoteSessionId) {
-      throw new BrowserProviderError("Steel session creation returned no session id", {
-        recoverable: true,
-        backend: this.backend,
-      });
+      throw new BrowserProviderError(
+        "Steel session creation returned no session id",
+        {
+          recoverable: true,
+          backend: this.backend,
+        },
+      );
     }
     const remoteContextId = String(created.contextId || "").trim() || undefined;
     this.remoteContextStore.setSessionContext(sessionId, {
@@ -112,7 +118,10 @@ export class SteelProvider implements BrowserProvider {
       remoteSessionId,
     });
     if (remoteContextId) {
-      this.remoteContextStore.setProfileContext(config.profileId, remoteContextId);
+      this.remoteContextStore.setProfileContext(
+        config.profileId,
+        remoteContextId,
+      );
     }
 
     const connectUrl = this.resolveConnectUrl(apiKey, remoteSessionId, created);
@@ -138,7 +147,10 @@ export class SteelProvider implements BrowserProvider {
     }
     if (config.viewport?.width && config.viewport?.height) {
       await page
-        .setViewportSize({ width: config.viewport.width, height: config.viewport.height })
+        .setViewportSize({
+          width: config.viewport.width,
+          height: config.viewport.height,
+        })
         .catch(() => {});
     }
 
@@ -192,10 +204,13 @@ export class SteelProvider implements BrowserProvider {
   getSession(sessionId: string): SessionSnapshot {
     const session = this.sessions.get(sessionId);
     if (!session || session.page.isClosed()) {
-      throw new BrowserProviderError(`No active web session for '${sessionId}'.`, {
-        recoverable: true,
-        backend: this.backend,
-      });
+      throw new BrowserProviderError(
+        `No active web session for '${sessionId}'.`,
+        {
+          recoverable: true,
+          backend: this.backend,
+        },
+      );
     }
     return this.snapshot(session);
   }
@@ -222,7 +237,9 @@ export class SteelProvider implements BrowserProvider {
       await session.context.close().catch(() => {});
       await session.browser.close().catch(() => {});
       if (apiKey) {
-        await this.releaseRemoteSession(apiKey, session.remoteSessionId).catch(() => {});
+        await this.releaseRemoteSession(apiKey, session.remoteSessionId).catch(
+          () => {},
+        );
       }
     } finally {
       this.remoteContextStore.clearSessionContext(sessionId);
@@ -264,7 +281,10 @@ export class SteelProvider implements BrowserProvider {
     };
   }
 
-  private attachContextEvents(sessionId: string, context: BrowserContext): void {
+  private attachContextEvents(
+    sessionId: string,
+    context: BrowserContext,
+  ): void {
     context.on("page", (page) => {
       const session = this.sessions.get(sessionId);
       if (!session) return;
@@ -319,7 +339,9 @@ export class SteelProvider implements BrowserProvider {
       });
       const session = this.sessions.get(sessionId);
       if (!session || session.page !== page) return;
-      const replacement = session.context.pages().find((candidate) => !candidate.isClosed());
+      const replacement = session.context
+        .pages()
+        .find((candidate) => !candidate.isClosed());
       if (replacement) {
         session.page = replacement;
       }
@@ -355,8 +377,9 @@ export class SteelProvider implements BrowserProvider {
     remoteSessionId: string,
     created: SteelSessionResponse,
   ): string {
-    const explicit =
-      String(created.connectUrl || created.websocketUrl || created.wsEndpoint || "").trim();
+    const explicit = String(
+      created.connectUrl || created.websocketUrl || created.wsEndpoint || "",
+    ).trim();
     if (explicit) return explicit;
     return `${this.connectBaseUrl}?apiKey=${encodeURIComponent(apiKey)}&sessionId=${encodeURIComponent(remoteSessionId)}`;
   }
@@ -395,15 +418,22 @@ export class SteelProvider implements BrowserProvider {
 
     const body = await safeReadJson(response);
     if (!response.ok) {
-      const message = extractErrorMessage(body) || response.statusText || "unknown error";
-      throw new BrowserProviderError(`Steel session create failed: ${message}`, {
-        recoverable: response.status >= 500 || response.status === 429 || response.status === 408,
-        quotaLimited:
-          response.status === 429 ||
-          /quota|credits|billing|limit exceeded/i.test(message),
-        statusCode: response.status,
-        backend: this.backend,
-      });
+      const message =
+        extractErrorMessage(body) || response.statusText || "unknown error";
+      throw new BrowserProviderError(
+        `Steel session create failed: ${message}`,
+        {
+          recoverable:
+            response.status >= 500 ||
+            response.status === 429 ||
+            response.status === 408,
+          quotaLimited:
+            response.status === 429 ||
+            /quota|credits|billing|limit exceeded/i.test(message),
+          statusCode: response.status,
+          backend: this.backend,
+        },
+      );
     }
 
     return body as SteelSessionResponse;
@@ -414,14 +444,20 @@ export class SteelProvider implements BrowserProvider {
     remoteSessionId: string,
   ): Promise<string | undefined> {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/sessions/${remoteSessionId}`, {
-        headers: {
-          "steel-api-key": apiKey,
+      const response = await fetch(
+        `${this.apiBaseUrl}/sessions/${remoteSessionId}`,
+        {
+          headers: {
+            "steel-api-key": apiKey,
+          },
+          signal: AbortSignal.timeout(10_000),
         },
-        signal: AbortSignal.timeout(10_000),
-      });
+      );
       if (!response.ok) return undefined;
-      const data = (await safeReadJson(response)) as Record<string, unknown> | null;
+      const data = (await safeReadJson(response)) as Record<
+        string,
+        unknown
+      > | null;
       if (!data) return undefined;
       return extractLiveViewUrl(data);
     } catch {
@@ -434,14 +470,20 @@ export class SteelProvider implements BrowserProvider {
     remoteSessionId: string,
   ): Promise<Record<string, unknown> | undefined> {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/sessions/${remoteSessionId}/context`, {
-        headers: {
-          "steel-api-key": apiKey,
+      const response = await fetch(
+        `${this.apiBaseUrl}/sessions/${remoteSessionId}/context`,
+        {
+          headers: {
+            "steel-api-key": apiKey,
+          },
+          signal: AbortSignal.timeout(12_000),
         },
-        signal: AbortSignal.timeout(12_000),
-      });
+      );
       if (!response.ok) return undefined;
-      const data = (await safeReadJson(response)) as Record<string, unknown> | null;
+      const data = (await safeReadJson(response)) as Record<
+        string,
+        unknown
+      > | null;
       if (!data) return undefined;
       const nested = data.sessionContext;
       if (nested && typeof nested === "object" && !Array.isArray(nested)) {
@@ -490,7 +532,11 @@ export class SteelProvider implements BrowserProvider {
     action: string,
   ): Promise<T> {
     let lastError: unknown;
-    for (let attempt = 1; attempt <= SteelProvider.START_RETRY_ATTEMPTS; attempt += 1) {
+    for (
+      let attempt = 1;
+      attempt <= SteelProvider.START_RETRY_ATTEMPTS;
+      attempt += 1
+    ) {
       try {
         return await operation();
       } catch (error) {
@@ -521,7 +567,9 @@ export class SteelProvider implements BrowserProvider {
   }
 }
 
-function extractLiveViewUrl(data: SteelSessionResponse | Record<string, unknown>): string | undefined {
+function extractLiveViewUrl(
+  data: SteelSessionResponse | Record<string, unknown>,
+): string | undefined {
   const blob = data as Record<string, unknown>;
   const possible = [
     blob.sessionViewerUrl,
@@ -536,31 +584,4 @@ function extractLiveViewUrl(data: SteelSessionResponse | Record<string, unknown>
     if (/^https?:\/\//i.test(asString)) return asString;
   }
   return undefined;
-}
-
-async function safeReadJson(response: Response): Promise<Record<string, unknown> | null> {
-  try {
-    return (await response.json()) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function extractErrorMessage(body: Record<string, unknown> | null): string | undefined {
-  if (!body) return undefined;
-  const fields = [
-    body.error,
-    body.message,
-    body.description,
-    (body as any).details?.message,
-  ];
-  for (const field of fields) {
-    const value = String(field || "").trim();
-    if (value) return value;
-  }
-  return undefined;
-}
-
-async function waitMs(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
 }

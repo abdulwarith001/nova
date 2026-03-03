@@ -14,7 +14,8 @@ export interface ChatServiceConfig {
   enableTelemetry: boolean;
   shadowMode: boolean;
   historyLimit?: number;
-  soulContent?: string;
+  identityContent?: string;
+  skillsSummary?: string;
 }
 
 export interface ChatTurnInput {
@@ -143,17 +144,24 @@ export class ChatService {
     const now = new Date();
     const timestamp = `Current date and time: ${now.toISOString()}.`;
 
+    const parts: string[] = [timestamp, ""];
+
     // Use IDENTITY.md content if available, otherwise fall back to a minimal prompt
-    if (this.config.soulContent) {
-      return [timestamp, "", this.config.soulContent].join("\n");
+    if (this.config.identityContent) {
+      parts.push(this.config.identityContent);
+    } else {
+      parts.push(
+        "You are Nova, a personal AI assistant.",
+        "Be warm, direct, and genuinely helpful.",
+      );
     }
 
-    return [
-      timestamp,
-      "",
-      "You are Nova, a personal AI assistant.",
-      "Be warm, direct, and genuinely helpful.",
-    ].join("\n");
+    // Append available skills so the LLM knows what it can do
+    if (this.config.skillsSummary) {
+      parts.push("", this.config.skillsSummary);
+    }
+
+    return parts.join("\n");
   }
 
   private toSimpleHistory(history: ChatHistoryMessage[]): Message[] {

@@ -1,12 +1,146 @@
 /**
- * Google Workspace skill — tool definitions.
+ * Google Workspace skill — self-contained tool definitions with execute handlers.
  *
- * These are the schema-only registrations. The actual wiring of execute()
- * handlers happens in gateway/src/tool-wiring.ts at startup.
+ * Exports wireTools() which registers all 14 tools and wires their
+ * execute handlers to the Google API clients. Silently skips if
+ * Google credentials are not configured.
  */
 
+import type { Runtime } from "../../../runtime/src/index.js";
 import type { ToolDefinition } from "../../../runtime/src/tools.js";
 
+/**
+ * Register all Google Workspace tools with execute handlers.
+ * Skips silently if credentials are not configured.
+ */
+export async function wireTools(runtime: Runtime): Promise<void> {
+  const googleConfigured =
+    process.env.GOOGLE_CLIENT_ID &&
+    process.env.GOOGLE_CLIENT_SECRET &&
+    process.env.GOOGLE_REFRESH_TOKEN;
+
+  // Always register schemas so the LLM knows about them
+  const registry = runtime.getTools();
+  for (const tool of tools) {
+    registry.register(tool);
+  }
+
+  if (!googleConfigured) {
+    console.log(
+      "ℹ️  Google tools registered but not configured (set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN)",
+    );
+    return;
+  }
+
+  // Wire execute handlers when credentials are available
+  try {
+    const { CalendarClient } =
+      await import("../../../runtime/src/google/calendar-client.js");
+    const { DriveClient } =
+      await import("../../../runtime/src/google/drive-client.js");
+    const { GmailClient: GoogleGmailClient } =
+      await import("../../../runtime/src/google/gmail-client.js");
+
+    const googleCreds = {
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
+    };
+
+    const gmail = new GoogleGmailClient(googleCreds);
+    const calendar = new CalendarClient(googleCreds);
+    const drive = new DriveClient(googleCreds);
+
+    const wire = (
+      name: string,
+      handler: (params: any) => Promise<unknown>,
+    ): void => {
+      const tool = registry.get(name);
+      if (tool) tool.execute = handler;
+    };
+
+    // Gmail
+    wire("gmail_list", async (p) => {
+      const messages = await gmail.listMessages({
+        maxResults: p.maxResults,
+        query: p.query,
+      });
+      return { count: messages.length, messages };
+    });
+    wire("gmail_read", async (p) => gmail.readMessage(p.messageId));
+    wire("gmail_send", async (p) =>
+      gmail.sendEmail({ to: p.to, subject: p.subject, body: p.body }),
+    );
+    wire("gmail_reply", async (p) =>
+      gmail.replyToEmail({ threadId: p.threadId, body: p.body }),
+    );
+    wire("gmail_search", async (p) => {
+      const messages = await gmail.search(p.query);
+      return { count: messages.length, messages };
+    });
+    wire("gmail_draft", async (p) =>
+      gmail.createDraft({ to: p.to, subject: p.subject, body: p.body }),
+    );
+
+    // Calendar
+    wire("calendar_list", async (p) => {
+      const events = await calendar.listEvents({
+        timeMin: p.timeMin,
+        timeMax: p.timeMax,
+        maxResults: p.maxResults,
+      });
+      return { count: events.length, events };
+    });
+    wire("calendar_create", async (p) =>
+      calendar.createEvent({
+        summary: p.summary,
+        start: p.start,
+        end: p.end,
+        description: p.description,
+        location: p.location,
+        attendees: p.attendees,
+      }),
+    );
+    wire("calendar_search", async (p) => {
+      const events = await calendar.searchEvents(p.query);
+      return { count: events.length, events };
+    });
+
+    // Drive
+    wire("drive_list", async (p) => {
+      const files = await drive.listFiles({ maxResults: p.maxResults });
+      return { count: files.length, files };
+    });
+    wire("drive_search", async (p) => {
+      const files = await drive.searchFiles(p.query);
+      return { count: files.length, files };
+    });
+    wire("drive_read", async (p) => drive.readFile(p.fileId));
+    wire("drive_upload", async (p) =>
+      drive.uploadFile({
+        name: p.name,
+        content: Buffer.from(p.content, "utf-8"),
+        mimeType: p.mimeType || "text/plain",
+        folderId: p.folderId,
+      }),
+    );
+    wire("drive_create_pdf", async (p) =>
+      drive.createPdf({
+        title: p.title,
+        content: p.content,
+        folderId: p.folderId,
+      }),
+    );
+
+    console.log(
+      "🔗 Loaded google-workspace skill (14 tools, credentials configured)",
+    );
+  } catch (googleError) {
+    console.warn("⚠️ Google tools not configured:", googleError);
+  }
+}
+
+// Schema-only definitions for backward compatibility and SkillLoader.loadSkill()
 const tools: ToolDefinition[] = [
   {
     name: "gmail_list",

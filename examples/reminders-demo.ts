@@ -16,7 +16,6 @@ async function main() {
   console.log("1️⃣  Creating runtime with reminder system...");
   const runtime = await Runtime.create({
     security: {
-      sandboxMode: "none",
       allowedTools: ["reminder_create"],
       deniedTools: [],
     },

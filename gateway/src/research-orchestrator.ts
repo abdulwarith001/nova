@@ -97,7 +97,7 @@ export class ResearchOrchestrator {
           model:
             config.provider === "anthropic"
               ? "claude-3-5-haiku-20241022"
-              : "gpt-4.1-nano",
+              : "gpt-4.1-mini",
           apiKey: process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY,
         },
         "You are a profile extraction agent.",
@@ -107,7 +107,7 @@ export class ResearchOrchestrator {
       );
       console.log(
         "📝 Profile extractor initialized (model:",
-        config.provider === "anthropic" ? "claude-3-5-haiku" : "gpt-4.1-nano",
+        config.provider === "anthropic" ? "claude-3-5-haiku" : "gpt-4.1-mini",
         ")",
       );
     } catch (err: any) {
@@ -259,6 +259,10 @@ export class ResearchOrchestrator {
             name: toolName,
             parameters: toolCall.parameters,
           });
+          console.log(
+            `🔧 Tool call: ${toolName}`,
+            JSON.stringify(toolCall.parameters).slice(0, 200),
+          );
 
           // Retry once for transient errors (timeout, network)
           let lastToolError: string | undefined;
@@ -268,7 +272,9 @@ export class ResearchOrchestrator {
             try {
               const toolStart = performance.now();
               const result = await withTimeout(
-                this.runtime.executeTool(toolName, toolCall.parameters),
+                this.runtime.executeTool(toolName, toolCall.parameters, {
+                  sessionId: userId,
+                }),
                 this.config.toolTimeoutMs,
                 `Tool '${toolName}' timed out after ${this.config.toolTimeoutMs}ms`,
               );
@@ -293,6 +299,9 @@ export class ResearchOrchestrator {
                 success: true,
               });
               toolSucceeded = true;
+              console.log(
+                `✅ Tool success: ${toolName} (${(performance.now() - toolStart).toFixed(0)}ms)`,
+              );
               break;
             } catch (error: any) {
               lastToolError = error?.message || "Unknown error";
@@ -313,10 +322,25 @@ export class ResearchOrchestrator {
 
           if (!toolSucceeded && lastToolError) {
             metrics.tool_failures++;
+            console.error(`❌ Tool failed: ${toolName} — ${lastToolError}`);
             toolResults.push({ toolName, error: lastToolError });
 
-            // Enriched error context — tell the LLM what to do
-            const enrichedError = `Tool '${toolName}' failed: ${lastToolError}. You can retry it with different parameters, use a different tool, or answer with what you already have.`;
+            // Enriched error context with tool-specific fallback suggestions
+            const fallbackHints: Record<string, string> = {
+              scrape:
+                "The page may be JavaScript-rendered. Try using 'browse' instead to take a screenshot and analyze it visually.",
+              web_search:
+                "Try using 'browse' to visit the URL directly and extract content from the page.",
+              browse:
+                "Try using 'scrape' for a simpler text extraction, or 'web_session_start' + 'web_observe' for interactive pages.",
+              web_act:
+                "Make sure you called web_observe first to see the page elements. Try with a different target (use text, placeholder, or name instead of CSS selectors).",
+              web_observe:
+                "The session may have ended. Try web_session_start again.",
+            };
+            const hint =
+              fallbackHints[toolName] || "Try a different tool or approach.";
+            const enrichedError = `Tool '${toolName}' failed: ${lastToolError}. ${hint} Do NOT give up — try an alternative tool now.`;
 
             if (this.config.provider === "openai" && toolCall.id) {
               modelHistory.push({

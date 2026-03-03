@@ -134,14 +134,6 @@ program
   });
 
 program
-  .command("soul [action]")
-  .description("Manage agent personality (edit|show|reset)")
-  .action(async (action?: string) => {
-    const { soulCommand } = await import("./commands/soul.js");
-    return soulCommand(action);
-  });
-
-program
   .command("skill [action]")
   .description("Manage agent skills (list)")
   .action(async (action?: string) => {

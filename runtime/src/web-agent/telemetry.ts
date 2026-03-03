@@ -11,10 +11,10 @@ export interface TelemetryEvent {
 
 export class WebTelemetry {
   private readonly rootDir: string;
+  private dirCreated = false;
 
   constructor(rootDir = join(homedir(), ".nova", "web-agent", "telemetry")) {
     this.rootDir = rootDir;
-    mkdirSync(this.rootDir, { recursive: true });
   }
 
   record(
@@ -30,6 +30,10 @@ export class WebTelemetry {
     };
     const filePath = this.filePath(sessionId);
     try {
+      if (!this.dirCreated) {
+        mkdirSync(this.rootDir, { recursive: true });
+        this.dirCreated = true;
+      }
       appendFileSync(filePath, `${JSON.stringify(event)}\n`, "utf-8");
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -38,7 +42,10 @@ export class WebTelemetry {
   }
 
   private filePath(sessionId: string): string {
-    const safe = String(sessionId || "default").replace(/[^a-zA-Z0-9._-]/g, "-");
+    const safe = String(sessionId || "default").replace(
+      /[^a-zA-Z0-9._-]/g,
+      "-",
+    );
     return join(this.rootDir, `${safe}.jsonl`);
   }
 }

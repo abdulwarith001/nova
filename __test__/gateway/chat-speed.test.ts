@@ -9,7 +9,7 @@ describe("planChatExecution", () => {
   it("routes greeting to tool path so agent can decide on tools", () => {
     const plan = planChatExecution("hi there");
     expect(plan.path).toBe("tool");
-    expect(plan.maxIterations).toBe(1);
+    expect(plan.maxIterations).toBe(4);
   });
 
   it("uses tool path with default iteration for explicit search prompt", () => {
@@ -24,15 +24,12 @@ describe("planChatExecution", () => {
   });
 
   it("uses configured default max iteration without regex intent routing", () => {
-    const plan = planChatExecution(
-      "any prompt",
-      {
-        NOVA_CHAT_SPEED_MODE: "turbo",
-        NOVA_CHAT_MAX_ITER_DEFAULT: "3",
-        NOVA_CHAT_MAX_ITER_COMPLEX: "4",
-        NOVA_CHAT_FAST_MAX_TOKENS: "120",
-      } as NodeJS.ProcessEnv,
-    );
+    const plan = planChatExecution("any prompt", {
+      NOVA_CHAT_SPEED_MODE: "turbo",
+      NOVA_CHAT_MAX_ITER_DEFAULT: "3",
+      NOVA_CHAT_MAX_ITER_COMPLEX: "4",
+      NOVA_CHAT_FAST_MAX_TOKENS: "120",
+    } as NodeJS.ProcessEnv);
     expect(plan.path).toBe("tool");
     expect(plan.maxIterations).toBe(3);
   });

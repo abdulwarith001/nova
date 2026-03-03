@@ -3,6 +3,7 @@ name: Email Automation
 description: Send, read, and manage emails via SMTP/IMAP
 category: communication
 keywords: [email, send, inbox, mail, message, reply, compose]
+status: planned
 ---
 
 # Email Automation Skill

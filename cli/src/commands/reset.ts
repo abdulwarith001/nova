@@ -1,6 +1,6 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
-import { existsSync, rmSync, readdirSync } from "fs";
+import { existsSync, rmSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
@@ -16,37 +16,37 @@ interface ResetOption {
 
 const RESET_OPTIONS: ResetOption[] = [
   {
-    name: "💬 Conversations",
+    name: "Conversations",
     value: "conversations",
     description: "Chat history stored in memory/conversations/",
     paths: [join(MEMORY_DIR, "conversations")],
   },
   {
-    name: "👤 User Profile",
+    name: "User Profile",
     value: "user_profile",
     description: "USER.md — everything the agent knows about you",
     paths: [join(MEMORY_DIR, "USER.md")],
   },
   {
-    name: "🤖 Agent Identity",
+    name: "Agent Identity",
     value: "identity",
     description: "IDENTITY.md — agent personality and learned behaviors",
     paths: [join(MEMORY_DIR, "IDENTITY.md")],
   },
   {
-    name: "🧠 Knowledge (legacy)",
+    name: "Knowledge (legacy)",
     value: "knowledge",
     description: "knowledge.json — legacy structured knowledge entries",
     paths: [join(MEMORY_DIR, "knowledge.json")],
   },
   {
-    name: "📝 Reasoning Logs",
+    name: "Reasoning Logs",
     value: "reasoning",
     description: "reasoning.log — OODA reasoning traces",
     paths: [join(NOVA_DIR, "reasoning.log")],
   },
   {
-    name: "⏰ Reminders",
+    name: "Reminders",
     value: "reminders",
     description: "Reminders database and files",
     paths: [
@@ -57,57 +57,56 @@ const RESET_OPTIONS: ResetOption[] = [
     ],
   },
   {
-    name: "🌐 Web Agent Data",
+    name: "Web Agent Data",
     value: "web_agent",
     description: "Web agent profiles and session data",
     paths: [join(NOVA_DIR, "web-agent"), join(NOVA_DIR, "profiles")],
   },
   {
-    name: "💓 Heartbeat",
+    name: "Heartbeat",
     value: "heartbeat",
     description: "heartbeat.md — proactive task schedule",
     paths: [join(NOVA_DIR, "heartbeat.md")],
   },
   {
-    name: "⚙️ Onboarding / Config",
+    name: "Onboarding / Config",
     value: "onboarding",
     description: "config.json + .env — API keys, LLM provider, model settings",
     paths: [join(NOVA_DIR, "config.json"), join(NOVA_DIR, ".env")],
   },
   {
-    name: "� Telegram Setup",
+    name: "Telegram Setup",
     value: "telegram",
     description: "Telegram bot token and owner config (stored in .env/config)",
     paths: [], // Handled by clearing config — included for visibility
   },
   {
-    name: "🔍 Brave Search",
+    name: "Brave Search",
     value: "brave",
     description: "Brave Search API key (stored in .env)",
     paths: [], // Handled by clearing config — included for visibility
   },
   {
-    name: "📧 Google Workspace",
+    name: "Google Workspace",
     value: "google",
     description: "Google OAuth credentials (stored in .env)",
     paths: [], // Handled by clearing config — included for visibility
   },
   {
-    name: "💬 WhatsApp Auth",
+    name: "WhatsApp Auth",
     value: "whatsapp",
     description: "WhatsApp authentication session data",
     paths: [join(NOVA_DIR, "whatsapp-auth")],
   },
   {
-    name: "�🗄️ Legacy Databases",
+    name: "Legacy Databases",
     value: "legacy_db",
-    description: "Old SQLite databases (memory.db, memory-v2.db, soul.md)",
+    description: "Old SQLite databases (memory.db, memory-v2.db)",
     paths: [
       join(NOVA_DIR, "memory.db"),
       join(NOVA_DIR, "memory-v2.db"),
       join(NOVA_DIR, "memory-v2.db-shm"),
       join(NOVA_DIR, "memory-v2.db-wal"),
-      join(NOVA_DIR, "soul.md"),
     ],
   },
 ];

@@ -1,5 +1,15 @@
+import type { Browser } from "playwright";
 import { chromium } from "playwright";
 import type { Agent } from "../../../agent/src/index.ts";
+
+let sharedBrowser: Browser | null = null;
+
+async function getSharedBrowser(): Promise<Browser> {
+  if (!sharedBrowser || !sharedBrowser.isConnected()) {
+    sharedBrowser = await chromium.launch({ headless: true });
+  }
+  return sharedBrowser;
+}
 
 export interface BrowseResult {
   url: string;
@@ -29,17 +39,18 @@ const VISION_PROMPT = [
 export async function browse(url: string, agent: Agent): Promise<BrowseResult> {
   const normalizedUrl = url.startsWith("http") ? url : `https://${url}`;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await getSharedBrowser();
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+  });
   try {
-    const page = await browser.newPage({
-      viewport: { width: 1280, height: 900 },
-    });
+    const page = await context.newPage();
     await page.goto(normalizedUrl, {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
     });
-    // Wait for JS-rendered content
-    await page.waitForTimeout(2000);
+    // Wait for network to settle instead of a fixed delay
+    await page.waitForLoadState("networkidle").catch(() => {});
 
     // Take screenshot as base64
     const screenshotBuffer = await page.screenshot({ fullPage: false });
@@ -109,6 +120,6 @@ export async function browse(url: string, agent: Agent): Promise<BrowseResult> {
       links: domData.links,
     };
   } finally {
-    await browser.close();
+    await context.close();
   }
 }

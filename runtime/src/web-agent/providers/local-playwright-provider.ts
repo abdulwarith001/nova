@@ -2,7 +2,7 @@ import type { BrowserContext, CDPSession, Page } from "playwright";
 import { chromium } from "playwright";
 import type { WebAgentSessionConfig } from "../contracts.js";
 import type { BrowserProvider, SessionSnapshot } from "../browser-provider.js";
-import { ProfileStore, type ProfileLease } from "../profile-store.js";
+import { BrowserProfileStore, type ProfileLease } from "../profile-store.js";
 import { WebTelemetry } from "../telemetry.js";
 
 interface ManagedSession {
@@ -24,7 +24,7 @@ export class LocalPlaywrightProvider implements BrowserProvider {
   private pageCounter = 0;
 
   constructor(
-    private readonly profileStore = new ProfileStore(),
+    private readonly profileStore = new BrowserProfileStore(),
     private readonly telemetry = new WebTelemetry(),
   ) {}
 
@@ -94,7 +94,9 @@ export class LocalPlaywrightProvider implements BrowserProvider {
   getPage(sessionId: string): Page {
     const session = this.sessions.get(sessionId);
     if (!session || session.page.isClosed()) {
-      throw new Error(`No active web session for '${sessionId}'. Start one with web_session_start.`);
+      throw new Error(
+        `No active web session for '${sessionId}'. Start one with web_session_start.`,
+      );
     }
     session.lastUsedAt = Date.now();
     this.profileStore.renew(session.lease);
@@ -164,7 +166,10 @@ export class LocalPlaywrightProvider implements BrowserProvider {
     };
   }
 
-  private attachContextEvents(sessionId: string, context: BrowserContext): void {
+  private attachContextEvents(
+    sessionId: string,
+    context: BrowserContext,
+  ): void {
     context.on("page", (page) => {
       const session = this.sessions.get(sessionId);
       if (!session) return;
@@ -173,7 +178,11 @@ export class LocalPlaywrightProvider implements BrowserProvider {
     });
   }
 
-  private attachPageEvents(sessionId: string, page: Page, emitTabOpen: boolean): void {
+  private attachPageEvents(
+    sessionId: string,
+    page: Page,
+    emitTabOpen: boolean,
+  ): void {
     if (this.attachedPages.has(page)) return;
     this.attachedPages.add(page);
 
@@ -202,7 +211,9 @@ export class LocalPlaywrightProvider implements BrowserProvider {
       });
       const session = this.sessions.get(sessionId);
       if (!session || session.page !== page) return;
-      const replacement = session.context.pages().find((candidate) => !candidate.isClosed());
+      const replacement = session.context
+        .pages()
+        .find((candidate) => !candidate.isClosed());
       if (replacement) {
         session.page = replacement;
       }
@@ -217,4 +228,3 @@ export class LocalPlaywrightProvider implements BrowserProvider {
     return id;
   }
 }
-

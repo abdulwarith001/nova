@@ -2,15 +2,15 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
-import { ProfileStore } from "../../../runtime/src/../../runtime/src/../../runtime/src/web-agent/profile-store.js";
+import { BrowserProfileStore } from "../../../runtime/src/../../runtime/src/../../runtime/src/web-agent/profile-store.js";
 
-describe("ProfileStore", () => {
+describe("BrowserProfileStore", () => {
   it("reclaims same-process lock", () => {
     const rootDir = join(tmpdir(), `nova-profile-test-${Date.now()}`);
     mkdirSync(rootDir, { recursive: true });
 
     try {
-      const store = new ProfileStore({ rootDir, leaseMs: 60_000 });
+      const store = new BrowserProfileStore({ rootDir, leaseMs: 60_000 });
       const profilePath = store.getProfilePath("telegram:123");
       mkdirSync(profilePath, { recursive: true });
 

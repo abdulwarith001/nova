@@ -3,6 +3,7 @@ name: Reminders
 description: Create time-based reminders and notifications
 category: data
 keywords: [reminder, remind, schedule, notification, alert, later]
+status: planned
 ---
 
 # Reminders

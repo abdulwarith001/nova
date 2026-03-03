@@ -1,9 +1,6 @@
 import type { ExecutionPlan } from "./executor";
 
-export type SandboxMode = "none" | "process" | "container" | "vm";
-
 export interface SecurityConfig {
-  sandboxMode: SandboxMode;
   allowedTools: string[];
   deniedTools: string[];
 }
@@ -45,7 +42,6 @@ export class SecurityManager {
    */
   static default(): SecurityConfig {
     return {
-      sandboxMode: "process",
       allowedTools: ["bash", "read", "write"],
       deniedTools: [],
     };

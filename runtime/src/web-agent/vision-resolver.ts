@@ -22,8 +22,12 @@ export class VisionResolver {
       };
     }
 
-    const text = String(target.text || "").trim().toLowerCase();
-    const role = String(target.role || "").trim().toLowerCase();
+    const text = String(target.text || "")
+      .trim()
+      .toLowerCase();
+    const role = String(target.role || "")
+      .trim()
+      .toLowerCase();
 
     if (!text) {
       return { confidence: 0, strategy: "none" };
@@ -31,80 +35,93 @@ export class VisionResolver {
 
     const quick = observation.elements.find((entry) => {
       const itemText = String(entry.text || "").toLowerCase();
-      const roleMatch = role ? String(entry.role || "").toLowerCase() === role : true;
+      const roleMatch = role
+        ? String(entry.role || "").toLowerCase() === role
+        : true;
       return roleMatch && itemText.includes(text);
     });
 
-    if (quick?.cssPath) {
+    if (quick) {
+      // Build a simple selector from stable attributes
+      const simpleSelector =
+        quick.id && !quick.id.includes("-")
+          ? `#${quick.id}`
+          : (quick as any).name
+            ? `[name="${(quick as any).name}"]`
+            : undefined;
       return {
-        css: quick.cssPath,
+        css: simpleSelector,
+        bbox: quick.bbox,
         confidence: 0.55,
         strategy: role ? "role-text-match" : "text-match",
       };
     }
 
-    const resolved = (await page.evaluate((input) => {
-      const doc = (globalThis as any).document as any;
-      const normalized = String(input.text || "").toLowerCase();
-      const roleHint = String(input.role || "").toLowerCase();
-      if (!normalized) return null;
+    const resolved = (await page.evaluate(
+      (input) => {
+        const doc = (globalThis as any).document as any;
+        const normalized = String(input.text || "").toLowerCase();
+        const roleHint = String(input.role || "").toLowerCase();
+        if (!normalized) return null;
 
-      const candidates = Array.from(
-        doc.querySelectorAll(
-          "button, a, input[type='button'], input[type='submit'], [role='button'], [role='link']",
-        ) as any,
-      );
+        const candidates = Array.from(
+          doc.querySelectorAll(
+            "button, a, input[type='button'], input[type='submit'], [role='button'], [role='link']",
+          ) as any,
+        );
 
-      const ranked = candidates
-        .map((el: any, index: number) => {
-          const role =
-            el.getAttribute?.("role") ||
-            (String(el.tagName || "").toLowerCase() === "a"
-              ? "link"
-              : String(el.tagName || "").toLowerCase());
-          const text = String(el.innerText || el.getAttribute?.("aria-label") || "")
-            .replace(/\s+/g, " ")
-            .trim()
-            .toLowerCase();
-          if (!text) return null;
-          const rolePenalty = roleHint && role !== roleHint ? 0.2 : 0;
-          const score = text.includes(normalized) ? 1 - rolePenalty : 0;
-          if (score <= 0) return null;
+        const ranked = candidates
+          .map((el: any, index: number) => {
+            const role =
+              el.getAttribute?.("role") ||
+              (String(el.tagName || "").toLowerCase() === "a"
+                ? "link"
+                : String(el.tagName || "").toLowerCase());
+            const text = String(
+              el.innerText || el.getAttribute?.("aria-label") || "",
+            )
+              .replace(/\s+/g, " ")
+              .trim()
+              .toLowerCase();
+            if (!text) return null;
+            const rolePenalty = roleHint && role !== roleHint ? 0.2 : 0;
+            const score = text.includes(normalized) ? 1 - rolePenalty : 0;
+            if (score <= 0) return null;
 
-          const rect = el.getBoundingClientRect();
-          const css = (() => {
-            if (el.id) return `#${el.id}`;
-            const tag = String(el.tagName || "div").toLowerCase();
-            const className = String(el.className || "")
-              .split(/\s+/)
-              .filter(Boolean)
-              .slice(0, 2)
-              .join(".");
-            if (className) return `${tag}.${className}`;
-            return `${tag}:nth-of-type(${index + 1})`;
-          })();
+            const rect = el.getBoundingClientRect();
+            const css = (() => {
+              if (el.id) return `#${el.id}`;
+              const tag = String(el.tagName || "div").toLowerCase();
+              const className = String(el.className || "")
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .join(".");
+              if (className) return `${tag}.${className}`;
+              return `${tag}:nth-of-type(${index + 1})`;
+            })();
 
-          return {
-            score,
-            css,
-            bbox: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
-          };
-        })
-        .filter(Boolean) as Array<{
-        score: number;
-        css: string;
-        bbox: { x: number; y: number; w: number; h: number };
-      }>;
-
-      ranked.sort((a, b) => b.score - a.score);
-      return ranked[0] || null;
-    }, { text, role })) as
-      | {
+            return {
+              score,
+              css,
+              bbox: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+            };
+          })
+          .filter(Boolean) as Array<{
           score: number;
           css: string;
           bbox: { x: number; y: number; w: number; h: number };
-        }
-      | null;
+        }>;
+
+        ranked.sort((a, b) => b.score - a.score);
+        return ranked[0] || null;
+      },
+      { text, role },
+    )) as {
+      score: number;
+      css: string;
+      bbox: { x: number; y: number; w: number; h: number };
+    } | null;
 
     if (!resolved) {
       return { confidence: 0, strategy: "none" };

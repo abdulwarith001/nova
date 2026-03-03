@@ -152,6 +152,13 @@ export class TelegramChannel {
     };
   }
 
+  /**
+   * Send a proactive message to a chat ID (used by heartbeat engine).
+   */
+  async sendProactiveMessage(chatId: number, text: string): Promise<void> {
+    await this.sendChunkedMessage(chatId, text);
+  }
+
   private async pollLoop(): Promise<void> {
     let retryMs = this.config.retryBaseMs;
     while (this.running) {
@@ -213,7 +220,10 @@ export class TelegramChannel {
     }
     if (command === "/reset") {
       this.chatService.resetHistory(`telegram:${chatId}`);
-      await this.sendMessage(chatId, "Chat context reset for this Telegram chat.");
+      await this.sendMessage(
+        chatId,
+        "Chat context reset for this Telegram chat.",
+      );
       return;
     }
 
@@ -287,7 +297,10 @@ export class TelegramChannel {
     });
   }
 
-  private async sendChunkedMessage(chatId: number, text: string): Promise<void> {
+  private async sendChunkedMessage(
+    chatId: number,
+    text: string,
+  ): Promise<void> {
     const chunks = splitTelegramMessage(text, TELEGRAM_MAX_MESSAGE);
     for (const chunk of chunks) {
       await this.sendMessage(chatId, chunk);
@@ -377,7 +390,10 @@ function splitTelegramMessage(text: string, maxLength: number): string[] {
   return chunks.filter(Boolean);
 }
 
-function buildTelegramResponse(baseText: string, sources: TelegramSource[]): string {
+function buildTelegramResponse(
+  baseText: string,
+  sources: TelegramSource[],
+): string {
   const normalized: Array<{ title: string; url: string }> = [];
   const seen = new Set<string>();
 

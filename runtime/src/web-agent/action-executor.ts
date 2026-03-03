@@ -54,7 +54,11 @@ export class ActionExecutor {
         const waitUntilInput = String(
           action.options?.waitUntil || "load",
         ).toLowerCase();
-        const waitUntil: "domcontentloaded" | "load" | "networkidle" | "commit" =
+        const waitUntil:
+          | "domcontentloaded"
+          | "load"
+          | "networkidle"
+          | "commit" =
           waitUntilInput === "load" ||
           waitUntilInput === "networkidle" ||
           waitUntilInput === "commit"
@@ -64,7 +68,11 @@ export class ActionExecutor {
           0,
           Math.min(
             5_000,
-            Number(action.options?.settleMs || process.env.NOVA_WEB_NAV_SETTLE_MS || 1200),
+            Number(
+              action.options?.settleMs ||
+                process.env.NOVA_WEB_NAV_SETTLE_MS ||
+                1200,
+            ),
           ),
         );
         await page.goto(targetUrl, { waitUntil, timeout: timeoutMs });
@@ -76,17 +84,29 @@ export class ActionExecutor {
         break;
       }
       case "click": {
-        const clicked = await this.click(page, action, options?.currentObservation);
+        const clicked = await this.click(
+          page,
+          action,
+          options?.currentObservation,
+        );
         data = { clicked };
         break;
       }
       case "fill": {
-        const filled = await this.fill(page, action, options?.currentObservation);
+        const filled = await this.fill(
+          page,
+          action,
+          options?.currentObservation,
+        );
         data = { filled, value: action.value || "" };
         break;
       }
       case "submit": {
-        const submitted = await this.submit(page, action, options?.currentObservation);
+        const submitted = await this.submit(
+          page,
+          action,
+          options?.currentObservation,
+        );
         data = { submitted };
         break;
       }
@@ -116,7 +136,9 @@ export class ActionExecutor {
         break;
       }
       case "search": {
-        const query = String(action.value || action.options?.query || "").trim();
+        const query = String(
+          action.value || action.options?.query || "",
+        ).trim();
         const results = await this.searchService.search(query, {
           limit: Number(action.options?.limit || 8),
           timeoutMs: Number(action.options?.timeoutMs || 45_000),
@@ -125,7 +147,9 @@ export class ActionExecutor {
         break;
       }
       default:
-        throw new Error(`Unsupported web action type: ${(action as { type?: string }).type}`);
+        throw new Error(
+          `Unsupported web action type: ${(action as { type?: string }).type}`,
+        );
     }
 
     this.telemetry.record(sessionId, "action", {
@@ -214,7 +238,11 @@ export class ActionExecutor {
       throw new Error("No matching DOM target found for click action");
     }
 
-    const fallback = await this.vision.resolve(page, action.target || {}, observation);
+    const fallback = await this.vision.resolve(
+      page,
+      action.target || {},
+      observation,
+    );
     if (fallback.css) {
       await page.locator(fallback.css).first().click({ timeout: 10_000 });
       return "vision-css";
@@ -227,7 +255,19 @@ export class ActionExecutor {
       return "vision-bbox";
     }
 
-    throw new Error("Unable to resolve click target with DOM or vision fallback");
+    // Coordinate fallback using target bbox
+    const clickBbox = action.target?.bbox;
+    if (clickBbox && clickBbox.w > 0 && clickBbox.h > 0) {
+      await page.mouse.click(
+        clickBbox.x + clickBbox.w / 2,
+        clickBbox.y + clickBbox.h / 2,
+      );
+      return "coordinate-click";
+    }
+
+    throw new Error(
+      "Unable to resolve click target with DOM, vision, or coordinate fallback",
+    );
   }
 
   private async fill(
@@ -246,13 +286,31 @@ export class ActionExecutor {
       throw new Error("No matching DOM target found for fill action");
     }
 
-    const fallback = await this.vision.resolve(page, action.target || {}, observation);
+    const fallback = await this.vision.resolve(
+      page,
+      action.target || {},
+      observation,
+    );
     if (fallback.css) {
       await page.locator(fallback.css).first().fill(value, { timeout: 10_000 });
       return "vision-css";
     }
 
-    throw new Error("Unable to resolve fill target with DOM or vision fallback");
+    // Coordinate fallback: click at center, clear, and type
+    const bbox = action.target?.bbox;
+    if (bbox && bbox.w > 0 && bbox.h > 0) {
+      await page.mouse.click(bbox.x + bbox.w / 2, bbox.y + bbox.h / 2);
+      // Triple-click to select all existing text, then type over it
+      await page.mouse.click(bbox.x + bbox.w / 2, bbox.y + bbox.h / 2, {
+        clickCount: 3,
+      });
+      await page.keyboard.type(value, { delay: 30 });
+      return "coordinate-type";
+    }
+
+    throw new Error(
+      "Unable to resolve fill target with DOM, vision, or coordinate fallback",
+    );
   }
 
   private async submit(
@@ -267,26 +325,70 @@ export class ActionExecutor {
     }
 
     if (observation) {
-      const fallback = await this.vision.resolve(page, action.target || {}, observation);
+      const fallback = await this.vision.resolve(
+        page,
+        action.target || {},
+        observation,
+      );
       if (fallback.css) {
         await page.locator(fallback.css).first().click({ timeout: 10_000 });
         return "vision-css";
       }
     }
 
+    // Coordinate fallback for submit buttons
+    const bbox = action.target?.bbox;
+    if (bbox && bbox.w > 0 && bbox.h > 0) {
+      await page.mouse.click(bbox.x + bbox.w / 2, bbox.y + bbox.h / 2);
+      return "coordinate-click";
+    }
+
     await page.keyboard.press("Enter");
     return "keyboard-enter";
   }
 
-  private async resolveLocator(page: Page, action: WebAction): Promise<Locator | null> {
+  private async resolveLocator(
+    page: Page,
+    action: WebAction,
+  ): Promise<Locator | null> {
     const target = action.target;
     if (!target) return null;
 
-    if (target.css) {
-      const locator = page.locator(target.css);
-      if ((await locator.count()) > 0) return locator;
+    // 1. By element name attribute (most stable for forms)
+    if (target.name) {
+      try {
+        const locator = page.locator(`[name="${target.name}"]`);
+        if ((await locator.count()) > 0) return locator;
+      } catch {
+        // continue
+      }
     }
 
+    // 2. By element ID
+    const targetId = target.id || (target as any).elementId;
+    if (targetId && !targetId.includes("-")) {
+      // Skip auto-generated IDs like "input-3"
+      try {
+        const locator = page.locator(`#${targetId}`);
+        if ((await locator.count()) > 0) return locator;
+      } catch {
+        // continue
+      }
+    }
+
+    // 3. By CSS selector (css, cssPath, selector)
+    const cssSelector =
+      target.css || (target as any).cssPath || (target as any).selector;
+    if (cssSelector) {
+      try {
+        const locator = page.locator(String(cssSelector));
+        if ((await locator.count()) > 0) return locator;
+      } catch {
+        // invalid selector — continue
+      }
+    }
+
+    // 4. By role + text
     if (target.role && target.text) {
       const role = target.role as Parameters<Page["getByRole"]>[0];
       try {
@@ -297,7 +399,48 @@ export class ActionExecutor {
       }
     }
 
+    // 5. By aria-label
+    if (target.ariaLabel) {
+      try {
+        const locator = page.getByLabel(target.ariaLabel, { exact: false });
+        if ((await locator.count()) > 0) return locator;
+      } catch {
+        // ignore
+      }
+    }
+
+    // 6. By placeholder
+    if (target.placeholder) {
+      try {
+        const locator = page.getByPlaceholder(target.placeholder, {
+          exact: false,
+        });
+        if ((await locator.count()) > 0) return locator;
+      } catch {
+        // ignore
+      }
+    }
+
     if (target.text) {
+      // 7. Try getByLabel (for form inputs associated with a <label>)
+      try {
+        const byLabel = page.getByLabel(target.text, { exact: false });
+        if ((await byLabel.count()) > 0) return byLabel;
+      } catch {
+        // ignore
+      }
+
+      // 8. Try getByPlaceholder
+      try {
+        const byPlaceholder = page.getByPlaceholder(target.text, {
+          exact: false,
+        });
+        if ((await byPlaceholder.count()) > 0) return byPlaceholder;
+      } catch {
+        // ignore
+      }
+
+      // 9. Try getByText
       const locator = page.getByText(target.text, { exact: false });
       if ((await locator.count()) > 0) return locator;
     }
@@ -310,7 +453,10 @@ export class ActionExecutor {
     timeoutMs: number,
     settleMs: number,
   ): Promise<void> {
-    const loadTimeoutMs = Math.max(1_500, Math.min(12_000, Math.floor(timeoutMs * 0.5)));
+    const loadTimeoutMs = Math.max(
+      1_500,
+      Math.min(12_000, Math.floor(timeoutMs * 0.5)),
+    );
 
     try {
       await page.waitForLoadState("load", { timeout: loadTimeoutMs });

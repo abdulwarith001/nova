@@ -6,7 +6,6 @@ export interface CanonicalizeOptions {
 const TRACKING_PARAM_PREFIXES = ["utm_", "fbclid", "gclid", "msclkid"];
 const BLOCKED_HOST_PATTERNS = [
   /(^|\.)duckduckgo\.com$/i,
-  /(^|\.)bing\.com$/i,
   /(^|\.)example\.com$/i,
 ];
 
@@ -83,10 +82,15 @@ export function isBlockedSourceUrl(rawUrl: string): boolean {
 
   try {
     const parsed = new URL(normalized);
-    if (BLOCKED_HOST_PATTERNS.some((pattern) => pattern.test(parsed.hostname))) {
+    if (
+      BLOCKED_HOST_PATTERNS.some((pattern) => pattern.test(parsed.hostname))
+    ) {
       return true;
     }
-    if (/\/search/i.test(parsed.pathname) && /(^|\.)bing\.com$/i.test(parsed.hostname)) {
+    if (
+      /\/search/i.test(parsed.pathname) &&
+      /(^|\.)bing\.com$/i.test(parsed.hostname)
+    ) {
       return true;
     }
     return false;

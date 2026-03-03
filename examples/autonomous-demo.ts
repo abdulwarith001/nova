@@ -18,7 +18,6 @@ async function main() {
   console.log("1️⃣  Creating runtime...");
   const runtime = await Runtime.create({
     security: {
-      sandboxMode: "none",
       allowedTools: ["bash", "read", "write"],
       deniedTools: [],
     },

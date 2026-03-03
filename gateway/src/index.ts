@@ -73,7 +73,6 @@ async function start() {
 
   const runtime = await Runtime.create({
     security: {
-      sandboxMode: "none",
       allowedTools: ["*"],
       deniedTools: [],
     },
@@ -81,32 +80,37 @@ async function start() {
       maxParallel: 4,
       defaultTimeoutMs: 30000,
     },
-    agent: agentConfig,
   });
   console.log("✅ Runtime initialized");
 
   // Load agent identity from IDENTITY.md profile
   const profileStore = runtime.getMarkdownMemory().getProfileStore();
-  const soulContent = profileStore.getIdentity();
+  const identityContent = profileStore.getIdentity();
   console.log("✅ Loaded IDENTITY.md");
 
-  const agent = new Agent(agentConfig, soulContent);
+  const agent = new Agent(agentConfig, identityContent);
 
   // Get tools from Runtime in agent-compatible format
   const allTools = runtime.getToolsForAgent();
   console.log(`📋 Loaded ${allTools.length} tools`);
 
   // === Wire tools that need runtime references ===
-  const {
-    wireBrowseTools,
-    wireGoogleWorkspaceTools,
-    wireSkillTools,
-    wireProfileTools,
-  } = await import("./tool-wiring.js");
-  await wireSkillTools(runtime);
+  const { wireSkillTools, wireProfileTools } = await import("./tool-wiring.js");
+  await wireSkillTools(runtime, agent);
   wireProfileTools(runtime);
-  await wireBrowseTools(runtime, agent);
-  await wireGoogleWorkspaceTools(runtime);
+
+  // Build skill index for system prompt injection
+  const { SkillLoader } = await import("../../runtime/src/skill-loader.js");
+  const skillLoader = new SkillLoader();
+  const projectRoot = (await import("path")).resolve(
+    (await import("url")).fileURLToPath(import.meta.url),
+    "../../..",
+  );
+  skillLoader.buildIndex(SkillLoader.getDefaultDirs(projectRoot));
+  const skillsSummary = skillLoader.getIndexSummary();
+  console.log(
+    `📋 Skill index: ${skillLoader.getIndex().length} skills available`,
+  );
 
   const useResearchOrchestratorV2 =
     process.env.NOVA_RESEARCH_ORCHESTRATOR_V2 !== "false";
@@ -141,7 +145,8 @@ async function start() {
     useResearchOrchestratorV2,
     enableTelemetry,
     shadowMode,
-    soulContent,
+    identityContent,
+    skillsSummary,
   });
 
   const telegramEnabled =
@@ -330,7 +335,31 @@ async function start() {
   const heartbeat = new HeartbeatEngine();
   heartbeat.onTick(async (tick) => {
     console.log(`💓 Heartbeat task "${tick.task.name}": ${tick.task.message}`);
-    // TODO: Route through chatService or telegramChannel for proactive messages
+
+    // Route proactive messages through the chat pipeline
+    try {
+      const result = await chatService.runChatTurn({
+        message: tick.task.message,
+        sessionId: `heartbeat:${tick.task.name}`,
+        historyKey: `heartbeat:${tick.task.name}`,
+        channel: "telegram",
+      });
+
+      if (result.response && telegramChannel.getStatus().connected) {
+        const status = telegramChannel.getStatus();
+        if (status.ownerChatId) {
+          await telegramChannel.sendProactiveMessage(
+            status.ownerChatId,
+            result.response,
+          );
+        }
+      }
+    } catch (err: any) {
+      console.warn(
+        `⚠️ Heartbeat delivery failed for "${tick.task.name}":`,
+        err?.message,
+      );
+    }
   });
   heartbeat.start();
 

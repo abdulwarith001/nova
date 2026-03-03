@@ -9,6 +9,7 @@ import {
 } from "../browser-provider.js";
 import { RemoteContextStore } from "../remote-context-store.js";
 import { WebTelemetry } from "../telemetry.js";
+import { safeReadJson, extractErrorMessage, waitMs } from "./provider-utils.js";
 
 interface BrowserbaseSessionResponse {
   id?: string;
@@ -49,7 +50,8 @@ export class BrowserbaseProvider implements BrowserProvider {
       process.env.BROWSERBASE_API_BASE_URL || "https://api.browserbase.com/v1",
     ).replace(/\/+$/, ""),
     private readonly connectBaseUrl = String(
-      process.env.BROWSERBASE_CONNECT_BASE_URL || "wss://connect.browserbase.com",
+      process.env.BROWSERBASE_CONNECT_BASE_URL ||
+        "wss://connect.browserbase.com",
     ).replace(/\/+$/, ""),
   ) {
     this.maxConcurrency = Math.max(
@@ -93,12 +95,16 @@ export class BrowserbaseProvider implements BrowserProvider {
     );
     const remoteSessionId = String(created.id || "").trim();
     if (!remoteSessionId) {
-      throw new BrowserProviderError("Browserbase session creation returned no session id", {
-        recoverable: true,
-        backend: this.backend,
-      });
+      throw new BrowserProviderError(
+        "Browserbase session creation returned no session id",
+        {
+          recoverable: true,
+          backend: this.backend,
+        },
+      );
     }
-    const contextId = String(created.contextId || remoteContextId || "").trim() || undefined;
+    const contextId =
+      String(created.contextId || remoteContextId || "").trim() || undefined;
     if (contextId) {
       this.remoteContextStore.setProfileContext(config.profileId, contextId);
     }
@@ -130,7 +136,10 @@ export class BrowserbaseProvider implements BrowserProvider {
     }
     if (config.viewport?.width && config.viewport?.height) {
       await page
-        .setViewportSize({ width: config.viewport.width, height: config.viewport.height })
+        .setViewportSize({
+          width: config.viewport.width,
+          height: config.viewport.height,
+        })
         .catch(() => {});
     }
 
@@ -183,10 +192,13 @@ export class BrowserbaseProvider implements BrowserProvider {
   getSession(sessionId: string): SessionSnapshot {
     const session = this.sessions.get(sessionId);
     if (!session || session.page.isClosed()) {
-      throw new BrowserProviderError(`No active web session for '${sessionId}'.`, {
-        recoverable: true,
-        backend: this.backend,
-      });
+      throw new BrowserProviderError(
+        `No active web session for '${sessionId}'.`,
+        {
+          recoverable: true,
+          backend: this.backend,
+        },
+      );
     }
     return this.snapshot(session);
   }
@@ -238,7 +250,10 @@ export class BrowserbaseProvider implements BrowserProvider {
     };
   }
 
-  private attachContextEvents(sessionId: string, context: BrowserContext): void {
+  private attachContextEvents(
+    sessionId: string,
+    context: BrowserContext,
+  ): void {
     context.on("page", (page) => {
       const session = this.sessions.get(sessionId);
       if (!session) return;
@@ -293,7 +308,9 @@ export class BrowserbaseProvider implements BrowserProvider {
       });
       const session = this.sessions.get(sessionId);
       if (!session || session.page !== page) return;
-      const replacement = session.context.pages().find((candidate) => !candidate.isClosed());
+      const replacement = session.context
+        .pages()
+        .find((candidate) => !candidate.isClosed());
       if (replacement) {
         session.page = replacement;
       }
@@ -328,8 +345,9 @@ export class BrowserbaseProvider implements BrowserProvider {
     remoteSessionId: string,
     created: BrowserbaseSessionResponse,
   ): string {
-    const explicit =
-      String(created.connectUrl || created.websocketUrl || created.wsEndpoint || "").trim();
+    const explicit = String(
+      created.connectUrl || created.websocketUrl || created.wsEndpoint || "",
+    ).trim();
     if (explicit) return explicit;
     return `${this.connectBaseUrl}?apiKey=${encodeURIComponent(apiKey)}&sessionId=${encodeURIComponent(remoteSessionId)}`;
   }
@@ -368,15 +386,22 @@ export class BrowserbaseProvider implements BrowserProvider {
 
     const body = await safeReadJson(response);
     if (!response.ok) {
-      const message = extractErrorMessage(body) || response.statusText || "unknown error";
-      throw new BrowserProviderError(`Browserbase session create failed: ${message}`, {
-        recoverable: response.status >= 500 || response.status === 429 || response.status === 408,
-        quotaLimited:
-          response.status === 429 ||
-          /quota|credits|billing|limit exceeded/i.test(message),
-        statusCode: response.status,
-        backend: this.backend,
-      });
+      const message =
+        extractErrorMessage(body) || response.statusText || "unknown error";
+      throw new BrowserProviderError(
+        `Browserbase session create failed: ${message}`,
+        {
+          recoverable:
+            response.status >= 500 ||
+            response.status === 429 ||
+            response.status === 408,
+          quotaLimited:
+            response.status === 429 ||
+            /quota|credits|billing|limit exceeded/i.test(message),
+          statusCode: response.status,
+          backend: this.backend,
+        },
+      );
     }
 
     return body as BrowserbaseSessionResponse;
@@ -387,16 +412,22 @@ export class BrowserbaseProvider implements BrowserProvider {
     remoteSessionId: string,
   ): Promise<string | undefined> {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/sessions/${remoteSessionId}/debug`, {
-        headers: {
-          "x-bb-api-key": apiKey,
+      const response = await fetch(
+        `${this.apiBaseUrl}/sessions/${remoteSessionId}/debug`,
+        {
+          headers: {
+            "x-bb-api-key": apiKey,
+          },
+          signal: AbortSignal.timeout(10_000),
         },
-        signal: AbortSignal.timeout(10_000),
-      });
+      );
       if (!response.ok) {
         return `https://www.browserbase.com/sessions/${encodeURIComponent(remoteSessionId)}`;
       }
-      const data = (await safeReadJson(response)) as Record<string, unknown> | null;
+      const data = (await safeReadJson(response)) as Record<
+        string,
+        unknown
+      > | null;
       if (!data) {
         return `https://www.browserbase.com/sessions/${encodeURIComponent(remoteSessionId)}`;
       }
@@ -433,7 +464,10 @@ export class BrowserbaseProvider implements BrowserProvider {
       } catch (error) {
         lastError = error;
         const recoverable = isRecoverableBrowserProviderError(error);
-        if (!recoverable || attempt >= BrowserbaseProvider.START_RETRY_ATTEMPTS) {
+        if (
+          !recoverable ||
+          attempt >= BrowserbaseProvider.START_RETRY_ATTEMPTS
+        ) {
           throw error;
         }
         await waitMs(this.retryDelayMs(attempt));
@@ -456,31 +490,4 @@ export class BrowserbaseProvider implements BrowserProvider {
   private retryDelayMs(attempt: number): number {
     return Math.min(2_000, 250 * 2 ** (attempt - 1));
   }
-}
-
-async function safeReadJson(response: Response): Promise<Record<string, unknown> | null> {
-  try {
-    return (await response.json()) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function extractErrorMessage(body: Record<string, unknown> | null): string | undefined {
-  if (!body) return undefined;
-  const fields = [
-    body.error,
-    body.message,
-    body.description,
-    (body as any).details?.message,
-  ];
-  for (const field of fields) {
-    const value = String(field || "").trim();
-    if (value) return value;
-  }
-  return undefined;
-}
-
-async function waitMs(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
 }

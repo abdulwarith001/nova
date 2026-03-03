@@ -19,13 +19,12 @@ interface ProfileLockFile {
   expiresAt: number;
 }
 
-export class ProfileStore {
+export class BrowserProfileStore {
   readonly rootDir: string;
   private readonly leaseMs: number;
 
   constructor(options?: { rootDir?: string; leaseMs?: number }) {
-    this.rootDir =
-      options?.rootDir || join(homedir(), ".nova", "profiles");
+    this.rootDir = options?.rootDir || join(homedir(), ".nova", "profiles");
     this.leaseMs = Math.max(30_000, options?.leaseMs ?? 10 * 60 * 1000);
     mkdirSync(this.rootDir, { recursive: true });
   }

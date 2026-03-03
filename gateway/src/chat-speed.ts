@@ -46,7 +46,7 @@ export function planChatExecution(
 
   const defaultMaxIterations = parsePositiveInt(
     env.NOVA_CHAT_MAX_ITER_DEFAULT,
-    mode === "quality" ? 2 : 1,
+    mode === "quality" ? 6 : 4,
   );
 
   return {
@@ -65,7 +65,9 @@ function sanitizeOrphanToolCalls(
   for (let i = 0; i < history.length; i++) {
     const message = history[i];
     if (message.tool_calls && message.tool_calls.length > 0) {
-      const requiredIds = new Set(message.tool_calls.map((toolCall) => toolCall.id));
+      const requiredIds = new Set(
+        message.tool_calls.map((toolCall) => toolCall.id),
+      );
       for (let j = i + 1; j < history.length; j++) {
         const toolMessage = history[j];
         if (toolMessage.role === "tool" && toolMessage.tool_call_id) {
@@ -83,7 +85,9 @@ export function trimConversationHistory(
   history: ChatHistoryMessage[],
   maxMessages: number = 12,
 ): ChatHistoryMessage[] {
-  const firstSystemMessage = history.find((message) => message.role === "system");
+  const firstSystemMessage = history.find(
+    (message) => message.role === "system",
+  );
   const nonSystem = history.filter((message) => message.role !== "system");
   const trimmed = sanitizeOrphanToolCalls(nonSystem.slice(-maxMessages));
   return firstSystemMessage ? [firstSystemMessage, ...trimmed] : trimmed;

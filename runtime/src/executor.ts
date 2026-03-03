@@ -1,11 +1,4 @@
-import Piscina from "piscina";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { existsSync } from "fs";
 import type { ToolRegistry } from "./tools";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 export interface ExecutorConfig {
   maxParallel: number;
@@ -30,30 +23,14 @@ export interface ExecutionResult {
 }
 
 /**
- * Parallel task executor with dependency resolution
+ * Parallel task executor with dependency resolution.
+ * Delegates actual tool execution to ToolRegistry (which owns the worker pools).
  */
 export class Executor {
-  private pool: Piscina;
   private config: ExecutorConfig;
 
   constructor(config: ExecutorConfig) {
     this.config = config;
-
-    // Resolve worker path: prefer .ts source (tsx/dev), fallback to compiled .js
-    const tsWorker = join(__dirname, "worker.ts");
-    const jsWorkerDist = join(dirname(__dirname), "dist", "worker.js");
-    const jsWorkerSrc = join(__dirname, "worker.js");
-    const workerPath = existsSync(tsWorker)
-      ? tsWorker
-      : existsSync(jsWorkerDist)
-        ? jsWorkerDist
-        : jsWorkerSrc;
-
-    this.pool = new Piscina({
-      filename: workerPath,
-      maxThreads: config.maxParallel,
-      idleTimeout: 60000,
-    });
   }
 
   /**
@@ -90,29 +67,14 @@ export class Executor {
   }
 
   /**
-   * Execute a single step
+   * Execute a single step by delegating to the ToolRegistry.
    */
   private async executeStep(
     step: ExecutionStep,
     tools: ToolRegistry,
   ): Promise<unknown> {
-    const tool = tools.get(step.toolName);
-    if (!tool) {
-      throw new Error(`Tool not found: ${step.toolName}`);
-    }
-
-    // Prefer in-process execution when tool provides a custom handler
-    if (tool.execute) {
-      return await tool.execute(step.parameters);
-    }
-
-    // Execute in worker thread for isolation
     try {
-      const result = await this.pool.run({
-        toolName: step.toolName,
-        parameters: step.parameters,
-      });
-      return result;
+      return await tools.execute(step.toolName, step.parameters);
     } catch (error) {
       console.error(`Error executing step ${step.id}:`, error);
       throw error;
@@ -136,10 +98,10 @@ export class Executor {
   }
 
   /**
-   * Shutdown executor
+   * Shutdown executor — no-op since ToolRegistry owns the worker pools.
    */
   async shutdown(): Promise<void> {
-    await this.pool.destroy();
+    // Worker pool lifecycle is managed by ToolRegistry
   }
 }
 

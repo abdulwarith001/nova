@@ -16,6 +16,10 @@ export interface WebActionTarget {
   css?: string;
   text?: string;
   role?: string;
+  name?: string;
+  placeholder?: string;
+  ariaLabel?: string;
+  id?: string;
   bbox?: { x: number; y: number; w: number; h: number };
 }
 
@@ -39,7 +43,12 @@ export interface WebObservationElement {
   id: string;
   role: string;
   text: string;
-  cssPath: string;
+  tagName: string;
+  name?: string;
+  placeholder?: string;
+  ariaLabel?: string;
+  type?: string;
+  bbox: { x: number; y: number; w: number; h: number };
 }
 
 export interface WebObservation {

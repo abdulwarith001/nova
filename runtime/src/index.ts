@@ -18,11 +18,6 @@ export interface RuntimeConfig {
   novaDir?: string;
   security: SecurityConfig;
   executor: ExecutorConfig;
-  agent?: {
-    provider: "openai" | "anthropic";
-    model: string;
-    apiKey?: string;
-  };
 }
 
 export interface Task {
@@ -177,21 +172,6 @@ export class Runtime {
       parameters: tool.parametersSchema,
     }));
   }
-
-  /**
-   * Execute a task with the agent (simplified API for gateway)
-   */
-  async executeTask(
-    task: string,
-    config?: { sessionId?: string; maxIterations?: number },
-  ) {
-    const executionPlan = {
-      taskId: config?.sessionId || `task-${Date.now()}`,
-      steps: [],
-    };
-    return await this.executor.execute(executionPlan, this.tools);
-  }
-
   /**
    * Shutdown runtime
    */

@@ -17,7 +17,6 @@ async function main() {
   console.log("1️⃣  Creating runtime with knowledge store...");
   const runtime = await Runtime.create({
     security: {
-      sandboxMode: "none",
       allowedTools: ["bash", "read", "write"],
       deniedTools: [],
     },
