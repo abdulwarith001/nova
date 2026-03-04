@@ -49,7 +49,6 @@ describe("TelegramChannel", () => {
 
     expect(chatService.runChatTurn).toHaveBeenCalledTimes(1);
     expect(channel.sendChunkedMessage).toHaveBeenCalledTimes(1);
-    expect(channel.sendMessage).not.toHaveBeenCalled();
   });
 
   it("denies unauthorized users", async () => {

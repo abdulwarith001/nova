@@ -154,6 +154,67 @@ export class ChatService {
     };
   }
 
+  /**
+   * Streaming chat turn — yields text deltas for real-time display.
+   * Uses agent.streamChat() for direct queries on Telegram.
+   * Falls back to non-streaming runChatTurn() for vision queries.
+   *
+   * Returns { stream, fallback } — if stream is set, consume it for deltas.
+   * If fallback is set, streaming wasn't possible and this is the full result.
+   */
+  async startStreamingChatTurn(input: ChatTurnInput): Promise<{
+    stream?: AsyncGenerator<string>;
+    fallback?: ChatTurnOutput;
+  }> {
+    const userMessage = String(input.message || "").trim();
+    if (!userMessage && !input.imageBase64) {
+      return { fallback: { response: "", success: true } };
+    }
+
+    // Vision doesn't support streaming
+    if (input.imageBase64) {
+      const result = await this.runChatTurn(input);
+      return { fallback: result };
+    }
+
+    // If orchestrator is enabled and it's not Telegram, fall back
+    if (this.config.useResearchOrchestratorV2 && input.channel !== "telegram") {
+      const result = await this.runChatTurn(input);
+      return { fallback: result };
+    }
+
+    // Telegram gets streaming — stream directly from the agent
+    const history = this.getOrCreateHistory(input.historyKey, input.channel);
+    const simpleHistory = this.toSimpleHistory(history);
+
+    // Return the stream — caller is responsible for consuming it
+    const stream = this.agent.streamChat(userMessage, simpleHistory);
+
+    // We need to store history after the stream is consumed.
+    // We'll return a wrapper that does this.
+    const self = this;
+    async function* wrappedStream(): AsyncGenerator<string> {
+      let fullResponse = "";
+      for await (const delta of stream) {
+        fullResponse += delta;
+        yield delta;
+      }
+
+      // Store history after stream completes
+      const nextHistory = trimConversationHistory(
+        [
+          ...history,
+          { role: "user", content: userMessage },
+          { role: "assistant", content: fullResponse },
+        ],
+        self.historyLimit,
+      );
+      self.histories.set(input.historyKey, nextHistory);
+    }
+
+    return { stream: wrappedStream() };
+  }
+
   getSessionCount(): number {
     return this.histories.size;
   }

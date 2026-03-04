@@ -415,6 +415,22 @@ export class Agent {
           yield event.delta.text;
         }
       }
+    } else if (this.config.provider === "openai" && this.openaiClient) {
+      const stream = await this.openaiClient.chat.completions.create({
+        model: this.config.model || "gpt-4o-mini",
+        max_tokens: this.config.maxTokens || 4096,
+        temperature: this.config.temperature || 0.7,
+        messages: messages.map((m) => ({
+          role: m.role as "user" | "assistant" | "system",
+          content: m.content,
+        })),
+        stream: true,
+      });
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        if (delta) yield delta;
+      }
     }
   }
 
