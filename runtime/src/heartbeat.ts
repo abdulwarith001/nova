@@ -212,6 +212,24 @@ export class HeartbeatEngine {
   }
 
   /**
+   * Dynamically set the next tick interval.
+   * The engine will restart its timer with the new interval.
+   */
+  setNextTickInterval(ms: number): void {
+    if (ms < 30_000) ms = 30_000; // minimum 30 seconds
+    if (ms > 86_400_000) ms = 86_400_000; // maximum 24 hours
+
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = setInterval(async () => {
+        await this.tick();
+      }, ms);
+    }
+
+    console.log(`💓 Heartbeat next check-in: ${Math.round(ms / 60_000)}m`);
+  }
+
+  /**
    * Get the path to heartbeat.md.
    */
   getHeartbeatPath(): string {

@@ -178,7 +178,7 @@ export class TelegramChannel {
    * Send a proactive message to a chat ID (used by heartbeat engine).
    */
   async sendProactiveMessage(chatId: number, text: string): Promise<void> {
-    await this.sendChunkedMessage(chatId, text);
+    await this.streamDelivery(chatId, text);
   }
 
   private async pollLoop(): Promise<void> {
