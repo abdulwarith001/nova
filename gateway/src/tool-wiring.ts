@@ -50,7 +50,7 @@ export async function wireSkillTools(
     console.warn("⚠️ Failed to load task skill:", err.message);
   }
 
-  // Image generation skill (DALL-E)
+  // Image generation skill (GPT Image)
   try {
     const { registerImageGenTools } =
       await import("../../skills/core/image-gen/tools.js");
@@ -58,6 +58,18 @@ export async function wireSkillTools(
     console.log("🎨 Wired image generation tools (generate_image)");
   } catch (err: any) {
     console.warn("⚠️ Failed to load image-gen skill:", err.message);
+  }
+
+  // Computer skill (shell, files, processes, system)
+  try {
+    const { registerComputerTools } =
+      await import("../../skills/core/computer/tools.js");
+    registerComputerTools(runtime.getTools());
+    console.log(
+      "💻 Wired computer tools (shell_exec, sessions, file_read/write/list, process, system_info)",
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Failed to load computer skill:", err.message);
   }
 }
 

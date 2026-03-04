@@ -53,67 +53,6 @@ export class ToolRegistry {
 
   private registerBuiltinTools(): void {
     this.register({
-      name: "bash",
-      description: "Execute shell commands",
-      category: "system",
-      keywords: ["command", "shell", "execute", "terminal", "run", "script"],
-      examples: ["list files", "run a script", "check process status"],
-      parametersSchema: {
-        type: "object",
-        properties: {
-          command: {
-            type: "string",
-            description: "Shell command to execute",
-          },
-        },
-        required: ["command"],
-      },
-      permissions: ["process"],
-    });
-
-    this.register({
-      name: "read",
-      description: "Read file contents",
-      category: "filesystem",
-      keywords: ["file", "read", "open", "contents", "view"],
-      examples: ["read config file", "open markdown file"],
-      parametersSchema: {
-        type: "object",
-        properties: {
-          path: {
-            type: "string",
-            description: "File path to read",
-          },
-        },
-        required: ["path"],
-      },
-      permissions: ["filesystem:read"],
-    });
-
-    this.register({
-      name: "write",
-      description: "Write file contents",
-      category: "filesystem",
-      keywords: ["file", "write", "create", "save", "update"],
-      examples: ["write config file", "create text file"],
-      parametersSchema: {
-        type: "object",
-        properties: {
-          path: {
-            type: "string",
-            description: "File path to write",
-          },
-          content: {
-            type: "string",
-            description: "Content to write",
-          },
-        },
-        required: ["path", "content"],
-      },
-      permissions: ["filesystem:write"],
-    });
-
-    this.register({
       name: "update_profile",
       description:
         "Update the user profile or agent identity file. Use this whenever you learn something new about the user (name, preferences, projects, etc.) or about yourself (learned behaviors, communication adjustments). The profile content is always available to you in context.",
@@ -150,28 +89,6 @@ export class ToolRegistry {
         required: ["file", "content"],
       },
       permissions: [],
-    });
-
-    // === Internal tools (used by external data orchestrator, hidden from direct chat LLM) ===
-    this.register({
-      name: "curl",
-      description: "Make raw HTTP requests",
-      category: "communication",
-      parametersSchema: {
-        type: "object",
-        properties: {
-          url: { type: "string", description: "URL to request" },
-          method: { type: "string", description: "HTTP method" },
-          headers: { type: "object", description: "Request headers" },
-          body: { type: "string", description: "Request body" },
-          json: { description: "JSON payload" },
-          timeoutMs: { type: "number" },
-          followRedirects: { type: "boolean" },
-          maxChars: { type: "number" },
-        },
-        required: ["url"],
-      },
-      permissions: ["network"],
     });
   }
 

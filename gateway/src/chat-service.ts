@@ -15,6 +15,7 @@ export interface ChatServiceConfig {
   shadowMode: boolean;
   historyLimit?: number;
   identityContent?: string;
+  rulesContent?: string;
   skillsSummary?: string;
 }
 
@@ -187,6 +188,11 @@ export class ChatService {
     const timestamp = `Current date/time: ${localISO} (${tzName}). Always use this timezone for scheduling.`;
 
     const parts: string[] = [timestamp, ""];
+
+    // Inject core rules at the TOP (highest priority for the LLM)
+    if (this.config.rulesContent) {
+      parts.push(this.config.rulesContent, "");
+    }
 
     // Use IDENTITY.md content if available, otherwise fall back to a minimal prompt
     if (this.config.identityContent) {

@@ -89,7 +89,8 @@ async function start() {
   // Load agent identity from IDENTITY.md profile
   const profileStore = runtime.getMarkdownMemory().getProfileStore();
   const identityContent = profileStore.getIdentity();
-  console.log("✅ Loaded IDENTITY.md");
+  const rulesContent = profileStore.getRules();
+  console.log("✅ Loaded IDENTITY.md + RULES.md");
 
   const agent = new Agent(agentConfig, identityContent);
 
@@ -149,6 +150,7 @@ async function start() {
     enableTelemetry,
     shadowMode,
     identityContent,
+    rulesContent,
     skillsSummary,
   });
 

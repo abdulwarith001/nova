@@ -42,7 +42,7 @@ export class SecurityManager {
    */
   static default(): SecurityConfig {
     return {
-      allowedTools: ["bash", "read", "write"],
+      allowedTools: ["shell_exec", "file_read", "file_write"],
       deniedTools: [],
     };
   }
