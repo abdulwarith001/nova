@@ -22,15 +22,6 @@ function buildRuntimeMock() {
     ensureConversation: vi.fn(),
   };
 
-  const mockKnowledgeJsonStore = {
-    getUserContext: vi.fn().mockReturnValue([]),
-    getAgentTraits: vi.fn().mockReturnValue([]),
-    search: vi.fn().mockReturnValue([]),
-    addEntry: vi.fn(),
-    supersedeEntry: vi.fn(),
-    count: vi.fn().mockReturnValue(0),
-  };
-
   const mockProfileStore = {
     getUser: vi
       .fn()
@@ -45,7 +36,6 @@ function buildRuntimeMock() {
     getMemory: () => ({ store, search }),
     getMarkdownMemory: () => ({
       getConversationStore: () => mockConvStore,
-      getKnowledgeJsonStore: () => mockKnowledgeJsonStore,
       getProfileStore: () => mockProfileStore,
     }),
     getToolsForAgent: () => [

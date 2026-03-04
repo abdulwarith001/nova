@@ -1,10 +1,5 @@
 import { Executor, ExecutorConfig } from "./executor";
-import {
-  MarkdownMemory,
-  type ChannelType,
-  type LearningJob,
-  type MemoryJobType,
-} from "./markdown-memory/index";
+import { MarkdownMemory, type ChannelType } from "./markdown-memory/index";
 import { SecurityManager, SecurityConfig } from "./security";
 import { ToolExecutionContext, ToolRegistry } from "./tools";
 import { Planner } from "./planner";
@@ -114,30 +109,6 @@ export class Runtime {
    */
   getMarkdownMemory(): MarkdownMemory {
     return this.markdownMemory;
-  }
-
-  /**
-   * Enqueue a learning job.
-   */
-  enqueueLearningJob(input: {
-    userId: string;
-    conversationId: string;
-    type: MemoryJobType;
-    payload?: Record<string, unknown>;
-    maxAttempts?: number;
-    runAfter?: number;
-  }): string {
-    return this.markdownMemory.enqueueLearningJob(input);
-  }
-
-  /**
-   * Process pending learning jobs.
-   */
-  async processPendingLearningJobs(input: {
-    limit?: number;
-    handler: (job: LearningJob) => Promise<void>;
-  }): Promise<{ processed: number; failed: number }> {
-    return await this.markdownMemory.processPendingLearningJobs(input);
   }
 
   /**

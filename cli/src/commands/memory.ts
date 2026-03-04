@@ -14,9 +14,9 @@ const MEMORY_DIR = join(NOVA_DIR, "memory");
  *   status   — Show memory system overview
  *   user     — Show user profile (USER.md)
  *   agent    — Show agent identity (IDENTITY.md)
- *   list     — List conversations, knowledge, or relationships
- *   search   — Search knowledge items
- *   export   — Export all memory as JSON
+ *   rules    — Show core rules (RULES.md)
+ *   list     — List conversations
+ *   export   — Export profiles as JSON
  */
 export async function memoryCommand(
   action?: string,
@@ -28,7 +28,7 @@ export async function memoryCommand(
   try {
     switch (action) {
       case "status":
-        showStatus(memory);
+        showStatus();
         break;
       case "user":
         showUserProfile(memory);
@@ -36,11 +36,11 @@ export async function memoryCommand(
       case "agent":
         showAgentIdentity(memory);
         break;
-      case "list":
-        showList(memory, args[0] || "conversations");
+      case "rules":
+        showRules(memory);
         break;
-      case "search":
-        searchMemory(memory, args.join(" "));
+      case "list":
+        showList(args[0] || "conversations");
         break;
       case "export":
         exportMemory(memory);
@@ -54,7 +54,7 @@ export async function memoryCommand(
   }
 }
 
-function showStatus(memory: MarkdownMemory): void {
+function showStatus(): void {
   console.log(chalk.cyan("\n📊 Nova Memory Status\n"));
 
   const convDir = join(MEMORY_DIR, "conversations");
@@ -62,18 +62,21 @@ function showStatus(memory: MarkdownMemory): void {
     ? readdirSync(convDir).filter((f) => f.endsWith(".md")).length
     : 0;
 
-  const store = memory.getKnowledgeJsonStore();
-  const knowledgeCount = store.count();
-  const agentTraits = store.getAgentTraits();
-  const userContext = store.getUserContext();
-  const pendingJobs = memory.getLearningEngine().listPendingJobs();
+  const hasUser = existsSync(join(MEMORY_DIR, "USER.md"));
+  const hasIdentity = existsSync(join(MEMORY_DIR, "IDENTITY.md"));
+  const hasRules = existsSync(join(MEMORY_DIR, "RULES.md"));
 
-  console.log(`  Conversations:      ${chalk.white(convCount)}`);
-  console.log(`  Knowledge entries:  ${chalk.white(knowledgeCount)}`);
-  console.log(`  User context items: ${chalk.white(userContext.length)}`);
-  console.log(`  Agent traits:       ${chalk.white(agentTraits.length)}`);
-  console.log(`  Pending jobs:       ${chalk.white(pendingJobs.length)}`);
-  console.log(`  Storage:            ${chalk.dim(MEMORY_DIR)}`);
+  console.log(`  Conversations:  ${chalk.white(convCount)}`);
+  console.log(
+    `  USER.md:        ${hasUser ? chalk.green("✓") : chalk.red("✗")}`,
+  );
+  console.log(
+    `  IDENTITY.md:    ${hasIdentity ? chalk.green("✓") : chalk.red("✗")}`,
+  );
+  console.log(
+    `  RULES.md:       ${hasRules ? chalk.green("✓") : chalk.red("✗")}`,
+  );
+  console.log(`  Storage:        ${chalk.dim(MEMORY_DIR)}`);
   console.log();
 }
 
@@ -93,7 +96,15 @@ function showAgentIdentity(memory: MarkdownMemory): void {
   console.log(identityContent);
 }
 
-function showList(memory: MarkdownMemory, entity: string): void {
+function showRules(memory: MarkdownMemory): void {
+  const profileStore = memory.getProfileStore();
+  const rulesContent = profileStore.getRules();
+
+  console.log(chalk.cyan("\n📋 Core Rules (RULES.md):\n"));
+  console.log(rulesContent);
+}
+
+function showList(entity: string): void {
   switch (entity) {
     case "conversations":
     case "convs": {
@@ -114,87 +125,20 @@ function showList(memory: MarkdownMemory, entity: string): void {
       console.log();
       break;
     }
-    case "knowledge":
-    case "memories": {
-      const store = memory.getKnowledgeJsonStore();
-      const items = store.getAllActive().slice(0, 20);
-      if (items.length === 0) {
-        console.log(chalk.yellow("No knowledge items yet."));
-        return;
-      }
-      console.log(chalk.cyan(`\n🧠 Knowledge Items (${items.length}):\n`));
-      for (const item of items) {
-        const imp = (item.importance * 100).toFixed(0);
-        console.log(
-          `  ${chalk.dim("•")} [${item.category}] ${item.content.slice(0, 100)} ${chalk.dim(`(${imp}%)`)}`,
-        );
-      }
-      console.log();
-      break;
-    }
-    case "relationships":
-    case "rels": {
-      const store = memory.getKnowledgeJsonStore();
-      const rels = store
-        .search("", { category: "relationship" })
-        .map((r) => r.entry);
-      if (rels.length === 0) {
-        console.log(chalk.yellow("No relationships yet."));
-        return;
-      }
-      console.log(chalk.cyan(`\n🔗 Relationships (${rels.length}):\n`));
-      for (const rel of rels) {
-        console.log(
-          `  ${chalk.white(rel.subject)} ${chalk.dim("→")} ${rel.content.slice(0, 80)}`,
-        );
-      }
-      console.log();
-      break;
-    }
     default:
       console.log(chalk.yellow(`Unknown entity: ${entity}`));
-      console.log("Available: conversations, knowledge, relationships");
+      console.log("Available: conversations");
   }
-}
-
-function searchMemory(memory: MarkdownMemory, query: string): void {
-  if (!query.trim()) {
-    console.log(
-      chalk.yellow("Provide a search query: nova memory search <query>"),
-    );
-    return;
-  }
-
-  const store = memory.getKnowledgeJsonStore();
-  const results = store.search(query, { limit: 10 });
-
-  if (results.length === 0) {
-    console.log(chalk.yellow(`No results for "${query}"`));
-    return;
-  }
-
-  console.log(
-    chalk.cyan(`\n🔍 Search Results for "${query}" (${results.length}):\n`),
-  );
-  for (const result of results) {
-    const score = (result.score * 100).toFixed(0);
-    console.log(
-      `  ${chalk.dim("•")} [${result.entry.category}] ${result.entry.content.slice(0, 120)} ${chalk.dim(`(${score}%)`)}`,
-    );
-  }
-  console.log();
 }
 
 function exportMemory(memory: MarkdownMemory): void {
-  const store = memory.getKnowledgeJsonStore();
   const profileStore = memory.getProfileStore();
 
   const data = {
     exportedAt: new Date().toISOString(),
     userProfile: profileStore.getUser(),
     agentIdentity: profileStore.getIdentity(),
-    knowledgeEntries: store.getAllActive(),
-    agentTraits: store.getAgentTraits(),
+    coreRules: profileStore.getRules(),
   };
 
   console.log(JSON.stringify(data, null, 2));
@@ -207,11 +151,9 @@ function showHelp(): void {
   console.log("  status                   — Memory system overview");
   console.log("  user                     — Show user profile (USER.md)");
   console.log("  agent                    — Show agent identity (IDENTITY.md)");
-  console.log(
-    "  list <entity>            — List conversations|knowledge|relationships",
-  );
-  console.log("  search <query>           — Search knowledge items");
-  console.log("  export                   — Export all memory as JSON");
+  console.log("  rules                    — Show core rules (RULES.md)");
+  console.log("  list conversations       — List recent conversations");
+  console.log("  export                   — Export profiles as JSON");
 }
 
 function normalizeArgs(input?: string | string[]): string[] {
