@@ -66,7 +66,7 @@ export async function wireSkillTools(
       await import("../../skills/core/computer/tools.js");
     registerComputerTools(runtime.getTools());
     console.log(
-      "💻 Wired computer tools (shell_exec, sessions, file_read/write/list, process, system_info)",
+      "💻 Wired computer tools (shell, sessions, files, process, system_info, clipboard, notify, open_app, screenshot, port_info)",
     );
   } catch (err: any) {
     console.warn("⚠️ Failed to load computer skill:", err.message);

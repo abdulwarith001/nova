@@ -178,6 +178,12 @@ export class TelegramChannel {
 
   private async pollLoop(): Promise<void> {
     let retryMs = this.config.retryBaseMs;
+    let consecutiveFailures = 0;
+    const CIRCUIT_BREAK_THRESHOLD = 5;
+    const CIRCUIT_BREAK_LONG_THRESHOLD = 10;
+    const CIRCUIT_BREAK_PAUSE_MS = 5 * 60 * 1000; // 5 min
+    const CIRCUIT_BREAK_LONG_PAUSE_MS = 15 * 60 * 1000; // 15 min
+
     while (this.running) {
       try {
         const updates = await this.getUpdates(this.lastUpdateId + 1);
@@ -186,12 +192,30 @@ export class TelegramChannel {
           await this.handleUpdate(update);
         }
         retryMs = this.config.retryBaseMs;
+        consecutiveFailures = 0;
       } catch (error: any) {
+        consecutiveFailures++;
         this.lastErrorAt = new Date().toISOString();
         this.lastError = error?.message || "Unknown error";
-        console.error("telegram poll error:", error);
-        await waitMs(retryMs);
-        retryMs = Math.min(this.config.retryMaxMs, retryMs * 2);
+
+        if (consecutiveFailures >= CIRCUIT_BREAK_LONG_THRESHOLD) {
+          console.error(
+            `🔴 Telegram circuit breaker: ${consecutiveFailures} consecutive failures — pausing 15min`,
+          );
+          await waitMs(CIRCUIT_BREAK_LONG_PAUSE_MS);
+          consecutiveFailures = 0;
+          retryMs = this.config.retryBaseMs;
+        } else if (consecutiveFailures >= CIRCUIT_BREAK_THRESHOLD) {
+          console.warn(
+            `🟡 Telegram circuit breaker: ${consecutiveFailures} consecutive failures — pausing 5min`,
+          );
+          await waitMs(CIRCUIT_BREAK_PAUSE_MS);
+          retryMs = this.config.retryBaseMs;
+        } else {
+          console.error("telegram poll error:", error);
+          await waitMs(retryMs);
+          retryMs = Math.min(this.config.retryMaxMs, retryMs * 2);
+        }
       }
     }
   }

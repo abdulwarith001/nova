@@ -153,5 +153,13 @@ program
     return tasksCommand(options);
   });
 
+program
+  .command("completion [shell]")
+  .description("Output shell completion script (zsh|bash)")
+  .action(async (shell?: string) => {
+    const { completionCommand } = await import("./commands/completion.js");
+    return completionCommand(shell);
+  });
+
 // Parse arguments
 program.parse();

@@ -41,13 +41,21 @@ export class TaskEngine {
   start(): void {
     if (this.timer) return;
 
-    console.log("⏰ Task engine started");
+    const lastTick = this.store.getLastTickAt();
+    const downtime = lastTick ? Date.now() - lastTick : 0;
+    if (downtime > this.tickIntervalMs) {
+      console.log(
+        `⏰ Task engine started (catching up ${Math.round(downtime / 1000)}s of downtime)`,
+      );
+    } else {
+      console.log("⏰ Task engine started");
+    }
 
     this.timer = setInterval(async () => {
       await this.tick();
     }, this.tickIntervalMs);
 
-    // Run immediately on start
+    // Run immediately on start (catches missed tasks from downtime)
     this.tick().catch((err) => {
       console.error("⚠️ Task engine tick error:", err);
     });
@@ -91,6 +99,7 @@ export class TaskEngine {
 
       return fired;
     } finally {
+      this.store.setLastTickAt(now);
       this.processing = false;
     }
   }

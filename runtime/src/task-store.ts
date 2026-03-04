@@ -64,9 +64,15 @@ export interface TaskStats {
 
 // ── Store ───────────────────────────────────────────────────────────────────
 
+interface TaskFileData {
+  lastTickAt?: number;
+  items: TaskItem[];
+}
+
 export class TaskStore {
   private readonly filePath: string;
   private items: TaskItem[] = [];
+  private lastTickAt: number = 0;
 
   constructor(novaDir?: string) {
     const dir = novaDir || join(homedir(), ".nova");
@@ -75,6 +81,15 @@ export class TaskStore {
     }
     this.filePath = join(dir, "tasks.json");
     this.load();
+  }
+
+  getLastTickAt(): number {
+    return this.lastTickAt;
+  }
+
+  setLastTickAt(ts: number): void {
+    this.lastTickAt = ts;
+    this.save();
   }
 
   // ── CRUD ────────────────────────────────────────────────────────────────
@@ -237,7 +252,16 @@ export class TaskStore {
     }
     try {
       const raw = readFileSync(this.filePath, "utf-8");
-      this.items = JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      // Support both old array format and new object format
+      if (Array.isArray(parsed)) {
+        this.items = parsed;
+        this.lastTickAt = 0;
+      } else {
+        const data = parsed as TaskFileData;
+        this.items = data.items || [];
+        this.lastTickAt = data.lastTickAt || 0;
+      }
     } catch {
       console.warn("⚠️ Failed to parse tasks.json, starting fresh");
       this.items = [];
@@ -249,6 +273,10 @@ export class TaskStore {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(this.filePath, JSON.stringify(this.items, null, 2), "utf-8");
+    const data: TaskFileData = {
+      lastTickAt: this.lastTickAt,
+      items: this.items,
+    };
+    writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf-8");
   }
 }

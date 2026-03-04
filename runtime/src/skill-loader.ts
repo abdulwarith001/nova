@@ -284,6 +284,8 @@ export class SkillLoader {
       "  Example: cd into project, install deps, build, test — all in one session that retains cwd and env vars.",
       "• Read files → file_read. Write/create files → file_write. List dirs → file_list.",
       "• System info → system_info. Find processes → process_list. Kill process → process_kill.",
+      "• Open apps → open_app. Take screenshots → screenshot(send: true). Read/write clipboard → clipboard.",
+      "• Send desktop notifications → notify. Check ports → port_info.",
       "",
       "BEST PRACTICES:",
       "• WORKSPACE: When creating files (scripts, websites, documents, code), ALWAYS write them to ~/.nova/workspace/. NEVER write to the Nova project source directory or any system directory. Create subdirectories as needed (e.g. ~/.nova/workspace/sub-folder/).",

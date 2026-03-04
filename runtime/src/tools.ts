@@ -44,6 +44,17 @@ export class ToolRegistry {
   private readonly generalPool: Piscina;
   private readonly browserPool: Piscina;
 
+  /** Rate limiting: tool name → array of call timestamps */
+  private readonly callLog: Map<string, number[]> = new Map();
+  private static readonly RATE_LIMITS: Record<string, number> = {
+    generate_image: 5,
+    web_session_start: 10,
+    browse: 10,
+    shell_exec: 30,
+  };
+  private static readonly DEFAULT_RATE_LIMIT = 60;
+  private static readonly RATE_WINDOW_MS = 60_000;
+
   constructor() {
     this.workerPath = this.resolveWorkerPath();
     this.generalPool = this.createPool(4);
@@ -139,6 +150,21 @@ export class ToolRegistry {
     if (!tool) {
       throw new Error(`Tool not found: ${name}`);
     }
+
+    // Rate limit check
+    const limit =
+      ToolRegistry.RATE_LIMITS[name] ?? ToolRegistry.DEFAULT_RATE_LIMIT;
+    const now = Date.now();
+    const log = this.callLog.get(name) ?? [];
+    const recent = log.filter((t) => now - t < ToolRegistry.RATE_WINDOW_MS);
+    if (recent.length >= limit) {
+      console.warn(`⚠️ Rate limit hit: ${name} (${limit}/min)`);
+      return {
+        error: `Rate limited: ${name} can be called at most ${limit} times per minute. Wait and retry.`,
+      };
+    }
+    recent.push(now);
+    this.callLog.set(name, recent);
 
     if (tool.execute) {
       return await tool.execute(params, context);
