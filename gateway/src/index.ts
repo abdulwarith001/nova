@@ -148,14 +148,19 @@ async function start() {
     `🧠 Research orchestrator v2: ${useResearchOrchestratorV2 ? "enabled" : "disabled"}`,
   );
 
-  const chatService = new ChatService(researchOrchestrator, agent, {
-    useResearchOrchestratorV2,
-    enableTelemetry,
-    shadowMode,
-    identityContent,
-    rulesContent,
-    skillsSummary,
-  });
+  const chatService = new ChatService(
+    researchOrchestrator,
+    agent,
+    {
+      useResearchOrchestratorV2,
+      enableTelemetry,
+      shadowMode,
+      identityContent,
+      rulesContent,
+      skillsSummary,
+    },
+    runtime.getMarkdownMemory().getConversationStore(),
+  );
 
   const telegramEnabled =
     process.env.NOVA_TELEGRAM_ENABLED !== undefined

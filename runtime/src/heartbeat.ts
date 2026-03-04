@@ -44,6 +44,7 @@ const DEFAULT_HEARTBEAT = `# Heartbeat Tasks
 
 export class HeartbeatEngine {
   private readonly heartbeatPath: string;
+  private readonly statePath: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private handler: HeartbeatHandler | null = null;
   private lastRunTimes: Map<string, number> = new Map();
@@ -52,6 +53,7 @@ export class HeartbeatEngine {
   constructor(novaDir?: string, tickIntervalMs = 60_000) {
     const dir = novaDir || join(homedir(), ".nova");
     this.heartbeatPath = join(dir, "heartbeat.md");
+    this.statePath = join(dir, "heartbeat-state.json");
     this.tickIntervalMs = tickIntervalMs;
 
     // Create default heartbeat.md if missing
@@ -61,6 +63,9 @@ export class HeartbeatEngine {
       }
       writeFileSync(this.heartbeatPath, DEFAULT_HEARTBEAT, "utf-8");
     }
+
+    // Load persisted lastRunTimes
+    this.loadState();
   }
 
   /**
@@ -165,10 +170,7 @@ export class HeartbeatEngine {
       await this.tick();
     }, this.tickIntervalMs);
 
-    // Run immediately on start
-    this.tick().catch((err) => {
-      console.error("⚠️ Heartbeat tick error:", err);
-    });
+    // Don't run immediately — respect persisted lastRunTimes schedule
   }
 
   /**
@@ -182,6 +184,7 @@ export class HeartbeatEngine {
       if (this.shouldRun(task, now)) {
         const tick: HeartbeatTick = { task, triggeredAt: now };
         this.lastRunTimes.set(task.name, now);
+        this.saveState();
         fired.push(tick);
 
         if (this.handler) {
@@ -234,5 +237,41 @@ export class HeartbeatEngine {
    */
   getHeartbeatPath(): string {
     return this.heartbeatPath;
+  }
+
+  /**
+   * Load persisted lastRunTimes from disk.
+   */
+  private loadState(): void {
+    try {
+      if (existsSync(this.statePath)) {
+        const raw = readFileSync(this.statePath, "utf-8");
+        const data = JSON.parse(raw);
+        if (data && typeof data === "object") {
+          for (const [key, value] of Object.entries(data)) {
+            if (typeof value === "number") {
+              this.lastRunTimes.set(key, value);
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-fatal — start fresh
+    }
+  }
+
+  /**
+   * Save lastRunTimes to disk.
+   */
+  private saveState(): void {
+    try {
+      const obj: Record<string, number> = {};
+      for (const [key, value] of this.lastRunTimes) {
+        obj[key] = value;
+      }
+      writeFileSync(this.statePath, JSON.stringify(obj, null, 2), "utf-8");
+    } catch {
+      // Non-fatal
+    }
   }
 }

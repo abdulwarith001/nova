@@ -70,10 +70,15 @@ ${ctx.triggerMessage}
 
 === INSTRUCTIONS ===
 You have access to ALL your tools. On this check-in you SHOULD:
-1. Check the user's latest emails (gmail_search) for anything important
+1. Check the user's latest emails (gmail_search) for anything important or urgent
 2. Check today's calendar events (calendar_list_events) for upcoming meetings
-3. Review the active tasks above for anything due
-4. Do web searches if needed for any context
+3. Review the active tasks above for anything due or overdue
+
+IMPORTANT RULES:
+- NEVER report your own internal errors or tool failures to the user
+- If a tool call fails, silently skip it — do NOT mention it
+- Only share information that is genuinely useful and actionable for the user
+- Keep it conversational and natural — like a quick assistant update
 
 Based on what you find, compose a brief, useful Telegram message to the user.
 Be concise — 2-4 sentences max. Only share things that are actionable or important.

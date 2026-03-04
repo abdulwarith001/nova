@@ -8,6 +8,10 @@ import {
   trimConversationHistory,
   type ChatHistoryMessage,
 } from "./chat-speed.js";
+import type {
+  MarkdownConversationStore,
+  ChannelType,
+} from "../../runtime/src/markdown-memory/conversation-store.js";
 
 export interface ChatServiceConfig {
   useResearchOrchestratorV2: boolean;
@@ -41,13 +45,16 @@ export interface ChatTurnOutput {
 export class ChatService {
   private readonly histories = new Map<string, ChatHistoryMessage[]>();
   private readonly historyLimit: number;
+  private readonly conversationStore?: MarkdownConversationStore;
 
   constructor(
     private readonly orchestrator: ResearchOrchestrator,
     private readonly agent: Agent,
     private readonly config: ChatServiceConfig,
+    conversationStore?: MarkdownConversationStore,
   ) {
     this.historyLimit = config.historyLimit ?? 24;
+    this.conversationStore = conversationStore;
   }
 
   resetHistory(historyKey: string): void {
@@ -80,6 +87,7 @@ export class ChatService {
           this.historyLimit,
         );
         this.histories.set(input.historyKey, nextHistory);
+        this.persistMessages(input, `[Image sent] ${prompt}`, visionResponse);
 
         return {
           response: visionResponse,
@@ -103,6 +111,7 @@ export class ChatService {
       });
 
       this.histories.set(input.historyKey, result.history);
+      this.persistMessages(input, userMessage, result.response);
       if (this.config.shadowMode) {
         void this.agent
           .chat(userMessage, this.toSimpleHistory(result.history))
@@ -147,6 +156,7 @@ export class ChatService {
       this.historyLimit,
     );
     this.histories.set(input.historyKey, nextHistory);
+    this.persistMessages(input, userMessage, fallbackResponse);
 
     return {
       response: fallbackResponse,
@@ -226,12 +236,39 @@ export class ChatService {
     const existing = this.histories.get(historyKey);
     if (existing) return existing;
 
-    const initialHistory: ChatHistoryMessage[] = [
-      {
-        role: "system",
-        content: this.buildInitialSystemPrompt(channel),
-      },
-    ];
+    const systemPrompt: ChatHistoryMessage = {
+      role: "system",
+      content: this.buildInitialSystemPrompt(channel),
+    };
+
+    // Try to hydrate from disk
+    if (this.conversationStore) {
+      try {
+        const stored = this.conversationStore.getRecentMessages({
+          userId: historyKey,
+          conversationId: historyKey,
+          limit: this.historyLimit,
+        });
+        if (stored.length > 0) {
+          const restoredHistory: ChatHistoryMessage[] = [
+            systemPrompt,
+            ...stored.map((m) => ({
+              role: m.role as string,
+              content: m.content,
+            })),
+          ];
+          this.histories.set(historyKey, restoredHistory);
+          console.log(
+            `📂 Restored ${stored.length} messages for session ${historyKey}`,
+          );
+          return restoredHistory;
+        }
+      } catch (err: any) {
+        console.warn(`⚠️ Failed to load history from disk:`, err?.message);
+      }
+    }
+
+    const initialHistory: ChatHistoryMessage[] = [systemPrompt];
     this.histories.set(historyKey, initialHistory);
     return initialHistory;
   }
@@ -285,5 +322,41 @@ export class ChatService {
         role: message.role as "system" | "user" | "assistant",
         content: message.content,
       }));
+  }
+
+  /**
+   * Persist user + assistant messages to the conversation store (disk).
+   * Best-effort — failures are logged but don't break the chat flow.
+   */
+  private persistMessages(
+    input: ChatTurnInput,
+    userMessage: string,
+    assistantMessage: string,
+  ): void {
+    if (!this.conversationStore) return;
+
+    const channel = (input.channel || "ws") as ChannelType;
+    const convId = input.historyKey;
+    const userId = input.historyKey;
+
+    try {
+      this.conversationStore.ensureConversation(userId, convId, channel);
+      this.conversationStore.addMessage({
+        userId,
+        conversationId: convId,
+        role: "user",
+        content: userMessage,
+        channel,
+      });
+      this.conversationStore.addMessage({
+        userId,
+        conversationId: convId,
+        role: "assistant",
+        content: assistantMessage,
+        channel,
+      });
+    } catch (err: any) {
+      console.warn("⚠️ Failed to persist messages:", err?.message);
+    }
   }
 }
