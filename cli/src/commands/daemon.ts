@@ -49,7 +49,9 @@ export async function daemonCommand(
       console.log("  " + chalk.bold("status") + "   Check daemon status");
       console.log("  " + chalk.bold("logs") + "     View daemon logs\n");
       console.log("Options:");
-      console.log("  " + chalk.gray("--force") + "  Force stop (kill and clear state)");
+      console.log(
+        "  " + chalk.gray("--force") + "  Force stop (kill and clear state)",
+      );
       console.log("Log options:");
       console.log("  " + chalk.gray("--tail") + "   Follow logs in real-time");
       console.log("  " + chalk.gray("--clear") + "  Clear log file\n");
@@ -125,12 +127,16 @@ async function waitForGatewayReady(
 }
 
 async function findGatewayPath(): Promise<string | null> {
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, resolve } = await import("node:path");
+
+  // In the published package or development repo, the gateway is two levels up from this file's dist/src location
+  // cli/src/commands/daemon.ts -> ../../gateway or cli/dist/commands/daemon.js -> ../../gateway
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const pkgRootGateway = resolve(__dirname, "..", "..", "..", "gateway");
+
   // Try multiple locations
-  const candidates = [
-    join(process.cwd(), "gateway"),
-    join(process.cwd(), "..", "gateway"),
-    join(homedir(), "personal-projects", "nova", "gateway"),
-  ];
+  const candidates = [pkgRootGateway, join(process.cwd(), "gateway")];
 
   for (const path of candidates) {
     if (existsSync(join(path, "package.json"))) {
@@ -184,10 +190,10 @@ async function startDaemon() {
       process.execPath,
       ["--import", "tsx", "src/index.ts"],
       {
-      cwd: gatewayPath,
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-      env: { ...process.env },
+        cwd: gatewayPath,
+        detached: true,
+        stdio: ["ignore", logFd, logFd],
+        env: { ...process.env },
       },
     );
 
@@ -199,7 +205,9 @@ async function startDaemon() {
     const healthy = await waitForGatewayReady(daemonPort, 15000);
     if (healthy) {
       spinner.succeed("Gateway started successfully");
-      console.log(chalk.gray(`\n   🔌 WebSocket: ws://127.0.0.1:${daemonPort}`));
+      console.log(
+        chalk.gray(`\n   🔌 WebSocket: ws://127.0.0.1:${daemonPort}`),
+      );
       console.log(chalk.gray("   📝 Logs: ~/.nova/daemon.log"));
       console.log(chalk.gray(`   🆔 PID: ${getDaemonPid()}\n`));
       console.log(chalk.green("✅ Ready! Use 'nova chat' to connect\n"));
@@ -318,7 +326,9 @@ async function daemonStatus() {
     console.log(chalk.gray(`   Logs: ${LOG_FILE}\n`));
     console.log(chalk.green(`   ✓ Port ${daemonPort} is healthy\n`));
   } else if (processRunning && pid) {
-    console.log(chalk.yellow("⚠️  Process running but gateway is not healthy\n"));
+    console.log(
+      chalk.yellow("⚠️  Process running but gateway is not healthy\n"),
+    );
     console.log(chalk.gray(`   PID: ${pid}`));
     console.log(chalk.gray(`   Expected Port: ${daemonPort}`));
     console.log(chalk.gray(`   Logs: ${LOG_FILE}\n`));

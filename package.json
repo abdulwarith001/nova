@@ -1,8 +1,29 @@
 {
-  "name": "nova",
+  "name": "novaa-agent",
   "version": "0.1.0",
   "description": "Next-generation AI super agent",
-  "private": true,
+  "private": false,
+  "bin": {
+    "nova": "./cli/bin/nova.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "runtime/dist",
+    "gateway/dist",
+    "gateway/src",
+    "agent/dist",
+    "cli/dist",
+    "cli/bin",
+    "runtime/package.json",
+    "gateway/package.json",
+    "agent/package.json",
+    "cli/package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
   "workspaces": [
     "runtime",
     "gateway",
@@ -62,21 +83,38 @@
   "author": "Nova Team",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.17.0",
+    "@fastify/cors": "^9.0.0",
+    "@fastify/websocket": "^10.0.0",
     "@mozilla/readability": "^0.6.0",
+    "bcrypt": "^5.1.1",
+    "better-sqlite3": "^9.3.0",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",
+    "conf": "^12.0.0",
     "cron-parser": "^5.5.0",
     "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.29.0",
+    "execa": "^8.0.1",
+    "fastify": "^4.26.0",
     "google-auth-library": "^10.5.0",
     "googleapis": "^171.2.0",
+    "gray-matter": "^4.0.3",
+    "hnswlib-node": "^3.0.0",
     "inquirer": "^13.2.2",
+    "isolated-vm": "^4.7.2",
     "jsdom": "^28.1.0",
+    "jsonwebtoken": "^9.0.2",
     "node-cron": "^4.2.1",
     "node-machine-id": "^1.1.12",
     "open": "^11.0.0",
+    "openai": "^4.26.0",
     "ora": "^9.2.0",
     "pdfkit": "^0.17.2",
+    "piscina": "^4.3.0",
     "playwright": "^1.58.1",
-    "ws": "^8.19.0"
+    "tsx": "^4.7.0",
+    "ws": "^8.19.0",
+    "zod": "^3.22.0"
   }
 }
