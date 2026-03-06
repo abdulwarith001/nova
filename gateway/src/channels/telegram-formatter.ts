@@ -84,21 +84,6 @@ export function formatStreamingChunk(accumulated: string): string {
 export function formatSourcesHtml(
   sources: Array<{ title?: string; url?: string }>,
 ): string {
-  if (!sources || sources.length === 0) return "";
+  return "";
 
-  const seen = new Set<string>();
-  const items: string[] = [];
-
-  for (const source of sources) {
-    const url = String(source?.url || "").trim();
-    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
-    seen.add(url);
-    const title = String(source?.title || "").trim() || url;
-    items.push(
-      `${items.length + 1}. <a href="${escapeHtml(url)}">${escapeHtml(title)}</a>`,
-    );
-    if (items.length >= 3) break;
-  }
-
-  return items.length > 0 ? `\n\n<b>Sources:</b>\n${items.join("\n")}` : "";
 }
