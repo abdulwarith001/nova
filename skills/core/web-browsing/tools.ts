@@ -40,7 +40,7 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
   registry.register({
     name: "web_search",
     description:
-      "Search the web for information. Returns a list of results with titles, URLs, and snippets. Use this when you need to find current information, facts, news, or answers to questions.",
+      "Search the web for information. Returns a list of results with titles, URLs, and snippets. Use this when you need to find current information, facts, news, or answers to questions. For in-depth multi-source research or evidence-backed analysis, use deep_research instead.",
     category: "browser",
     keywords: ["search", "web", "query", "latest", "news", "find", "look up"],
     examples: [
@@ -82,7 +82,7 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
   registry.register({
     name: "browse",
     description:
-      "Open a URL in a real browser, take a screenshot, and analyze the page visually. This is READ-ONLY — it cannot click buttons, fill forms, or interact with the page. Use this when you just need to see what a page looks like. For clicking, filling forms, or submitting, use web_session_start + web_act instead.",
+      "Open a URL in a real browser, take a screenshot, and analyze the page visually. This is READ-ONLY — it cannot click buttons, fill forms, or interact with the page. Use this when you just need to see what a page looks like. For clicking, filling forms, or submitting, use web_session_start + web_act instead. For research across multiple sources, use deep_research instead.",
     category: "browser",
     keywords: [
       "browse",
@@ -131,7 +131,7 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
   registry.register({
     name: "scrape",
     description:
-      "Extract readable content from a URL. Best for articles, blog posts, documentation, and text-heavy pages. Faster than browse — use this when you just need the text content, not the visual layout.",
+      "Extract readable content from a URL. Best for articles, blog posts, documentation, and text-heavy pages. Faster than browse — use this when you just need the text content, not the visual layout. For comprehensive research across multiple sources, use deep_research instead.",
     category: "data",
     keywords: [
       "scrape",

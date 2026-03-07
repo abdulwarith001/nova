@@ -15,6 +15,16 @@ export async function wireSkillTools(
   runtime: Runtime,
   agent: Agent,
 ): Promise<void> {
+  // Research agent skill (deep research orchestration)
+  try {
+    const researchAgent = await import("../../skills/core/research-agent/tools.js");
+    if (researchAgent.wireTools) {
+      await researchAgent.wireTools(runtime, agent);
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Failed to load research-agent skill:", err.message);
+  }
+
   // Web browsing skill (browse, scrape, web_search, web-agent tools)
   try {
     const webBrowsing = await import("../../skills/core/web-browsing/tools.js");

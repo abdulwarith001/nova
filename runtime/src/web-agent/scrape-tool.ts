@@ -1,4 +1,4 @@
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { Readability } from "@mozilla/readability";
 
 export interface ScrapeResult {
@@ -45,7 +45,13 @@ export async function scrape(url: string): Promise<ScrapeResult> {
   }
 
   // Parse with JSDOM + Readability
-  const dom = new JSDOM(html, { url: normalizedUrl });
+  // Use a virtual console to suppress "Could not parse CSS stylesheet" warnings
+  // from modern CSS features (e.g. @layer, nesting) that JSDOM doesn't support.
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on("error", () => {
+    // Intentionally swallow CSS parse errors — they don't affect content extraction
+  });
+  const dom = new JSDOM(html, { url: normalizedUrl, virtualConsole });
   const doc = dom.window.document;
   const reader = new Readability(doc);
   const article = reader.parse();

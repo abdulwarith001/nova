@@ -368,7 +368,7 @@ async function start() {
   app.get("/api/status", async () => {
     return {
       status: "running",
-      version: "0.1.0",
+      version: "0.1.12",
       uptime: process.uptime(),
       tools: allTools.length,
       chatSessions: chatService.getSessionCount(),

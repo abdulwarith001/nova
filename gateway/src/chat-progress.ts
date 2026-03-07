@@ -135,6 +135,7 @@ function resolveToolStage(toolName: string): ChatProgressStage {
   if (toolName.startsWith("web_observe")) return "reading_sources";
   if (toolName.startsWith("web_extract_structured")) return "extracting";
   if (toolName.startsWith("web_session_end")) return "finalizing";
+  if (toolName.startsWith("deep_research")) return "synthesizing";
   if (
     toolName.includes("search") ||
     toolName.includes("lookup") ||

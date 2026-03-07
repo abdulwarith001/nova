@@ -128,23 +128,42 @@ async function waitForGatewayReady(
 
 async function findGatewayPath(): Promise<string | null> {
   const { fileURLToPath } = await import("node:url");
-  const { dirname, resolve } = await import("node:path");
+  const { dirname, join, resolve } = await import("node:path");
 
-  // In the published package or development repo, the gateway is two levels up from this file's dist/src location
-  // cli/src/commands/daemon.ts -> ../../gateway or cli/dist/commands/daemon.js -> ../../gateway
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const pkgRootGateway = resolve(__dirname, "..", "..", "..", "gateway");
 
-  // Try multiple locations
-  const candidates = [pkgRootGateway, join(process.cwd(), "gateway")];
-
-  for (const path of candidates) {
-    if (existsSync(join(path, "package.json"))) {
-      return path;
+  // 1. Recursive upward search for the root directory containing 'gateway'
+  let currentDir = __dirname;
+  while (currentDir !== "/" && currentDir !== dirname(currentDir)) {
+    const candidate = join(currentDir, "gateway");
+    if (existsSync(candidate) && existsSync(join(candidate, "package.json"))) {
+      return candidate;
     }
+    // Also check if we are already inside the gateway directory (unlikely but possible)
+    if (
+      basename(currentDir) === "gateway" &&
+      existsSync(join(currentDir, "package.json"))
+    ) {
+      return currentDir;
+    }
+    currentDir = dirname(currentDir);
+  }
+
+  // 2. Fallback to process.cwd() for local dev
+  const localCandidate = join(process.cwd(), "gateway");
+  if (
+    existsSync(localCandidate) &&
+    existsSync(join(localCandidate, "package.json"))
+  ) {
+    return localCandidate;
   }
 
   return null;
+}
+
+// Helper to get basename as it's not imported at top level
+function basename(path: string): string {
+  return path.split(/[\/\\]/).pop() || "";
 }
 
 async function startDaemon() {
@@ -171,31 +190,36 @@ async function startDaemon() {
     if (!gatewayPath) {
       spinner.fail("Cannot find gateway directory");
       console.log(
-        chalk.red("\n   Make sure you're in the Nova project directory\n"),
+        chalk.red(
+          "\n   Could not locate the Nova gateway directory. Try running 'nova chat' from within the project folder or reinstalling the package.\n",
+        ),
       );
       return;
     }
 
+    // Determine startup command
+    // We always use tsx to start the gateway from src in production to avoid
+    // ESM module resolution issues (missing extensions) in compiled code.
+    const actualExecArgs = ["--import", "tsx", "src/index.ts"];
+
+    const execCmd = process.execPath;
+
     // Create log file
     writeFileSync(
       LOG_FILE,
-      `[${new Date().toISOString()}] Starting gateway with ${process.execPath} --import tsx src/index.ts\n`,
+      `[${new Date().toISOString()}] Starting gateway: ${execCmd} ${actualExecArgs.join(" ")} in ${gatewayPath}\n`,
     );
 
     // Open log file for writing (use file descriptor for spawn stdio)
     const { openSync } = await import("fs");
     const logFd = openSync(LOG_FILE, "a");
 
-    const daemonProcess = spawn(
-      process.execPath,
-      ["--import", "tsx", "src/index.ts"],
-      {
-        cwd: gatewayPath,
-        detached: true,
-        stdio: ["ignore", logFd, logFd],
-        env: { ...process.env },
-      },
-    );
+    const daemonProcess = spawn(execCmd, actualExecArgs, {
+      cwd: gatewayPath,
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+      env: { ...process.env },
+    });
 
     // Save PID
     writeFileSync(PID_FILE, daemonProcess.pid!.toString());

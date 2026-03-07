@@ -1,6 +1,6 @@
 {
   "name": "@nova/cli",
-  "version": "0.1.4",
+  "version": "0.1.12",
   "type": "module",
   "description": "Nova CLI for managing AI super agent",
   "main": "dist/index.js",
@@ -16,7 +16,8 @@
     "commander": "^11.1.0",
     "chalk": "^5.3.0",
     "ora": "^8.0.1",
-    "inquirer": "^9.2.12",
+    "inquirer": "^13.2.2",
+    "@inquirer/prompts": "^8.2.0",
     "conf": "^12.0.0",
     "execa": "^8.0.1"
   },

@@ -16,7 +16,7 @@ import { webAgentCommand } from "./commands/web-agent.js";
 program
   .name("nova")
   .description(chalk.cyan("🚀 Nova AI Agent CLI"))
-  .version("0.1.4");
+  .version("0.1.12");
 
 // Onboarding
 program

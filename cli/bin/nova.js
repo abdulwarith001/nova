@@ -16,7 +16,7 @@ async function main() {
     await import(pathToFileURL(srcEntry).href);
   } catch {
     // Fallback: try dist
-    const distEntry = join(__dirname, "..", "dist", "index.js");
+    const distEntry = join(__dirname, "..", "dist", "cli", "src", "index.js");
     await import(pathToFileURL(distEntry).href);
   }
 }

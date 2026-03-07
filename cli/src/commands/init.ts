@@ -1,4 +1,4 @@
-import inquirer from "inquirer";
+import { select, input, password, confirm } from "@inquirer/prompts";
 import chalk from "chalk";
 import { writeFileSync, mkdirSync, existsSync, readFileSync } from "fs";
 import { homedir } from "os";
@@ -14,15 +14,10 @@ export async function initCommand() {
 
   // Check if already initialized
   if (existsSync(envPath)) {
-    const { overwrite } = await inquirer.prompt([
-      {
-        type: "confirm",
-        name: "overwrite",
-        message:
-          "Nova is already configured. Overwrite existing configuration?",
-        default: false,
-      },
-    ]);
+    const overwrite = await confirm({
+      message: "Nova is already configured. Overwrite existing configuration?",
+      default: false,
+    });
 
     if (!overwrite) {
       console.log(chalk.yellow("\n👋 Setup cancelled.\n"));
@@ -31,43 +26,31 @@ export async function initCommand() {
   }
 
   // 1. Choose LLM provider
-  const { provider } = await inquirer.prompt([
-    {
-      type: "list",
-      name: "provider",
-      message: "Choose your LLM provider:",
-      choices: [
-        { name: "OpenAI", value: "openai" },
-        { name: "Anthropic", value: "anthropic" },
-        { name: "Both", value: "both" },
-      ],
-    },
-  ]);
+  const provider = await select({
+    message: "Choose your LLM provider:",
+    choices: [
+      { name: "OpenAI", value: "openai" },
+      { name: "Anthropic", value: "anthropic" },
+      { name: "Both", value: "both" },
+    ],
+  });
 
   // 2. API Keys
   const apiKeys: Record<string, string> = {};
 
   if (provider === "openai" || provider === "both") {
-    const { openaiKey } = await inquirer.prompt([
-      {
-        type: "password",
-        name: "openaiKey",
-        message: "Enter your OpenAI API key:",
-        validate: (input: string) => input.length > 0 || "API key required",
-      },
-    ]);
+    const openaiKey = await password({
+      message: "Enter your OpenAI API key:",
+      validate: (input: string) => input.length > 0 || "API key required",
+    });
     apiKeys.OPENAI_API_KEY = openaiKey;
   }
 
   if (provider === "anthropic" || provider === "both") {
-    const { anthropicKey } = await inquirer.prompt([
-      {
-        type: "password",
-        name: "anthropicKey",
-        message: "Enter your Anthropic API key:",
-        validate: (input: string) => input.length > 0 || "API key required",
-      },
-    ]);
+    const anthropicKey = await password({
+      message: "Enter your Anthropic API key:",
+      validate: (input: string) => input.length > 0 || "API key required",
+    });
     apiKeys.ANTHROPIC_API_KEY = anthropicKey;
   }
 
@@ -112,14 +95,10 @@ export async function initCommand() {
         ? anthropicModels
         : [...openaiModels, ...anthropicModels];
 
-  const { defaultModel } = await inquirer.prompt([
-    {
-      type: "list",
-      name: "defaultModel",
-      message: "Choose default model:",
-      choices: models,
-    },
-  ]);
+  const defaultModel = await select({
+    message: "Choose default model:",
+    choices: models,
+  });
 
   // 4. Create config directory
   mkdirSync(configDir, { recursive: true });
@@ -176,14 +155,10 @@ export async function initCommand() {
   console.log(chalk.gray(`   Env: ${envPath}\n`));
 
   // 7. Prompt to start daemon
-  const { startDaemon } = await inquirer.prompt([
-    {
-      type: "confirm",
-      name: "startDaemon",
-      message: "Start Nova daemon now?",
-      default: true,
-    },
-  ]);
+  const startDaemon = await confirm({
+    message: "Start Nova daemon now?",
+    default: true,
+  });
 
   if (startDaemon) {
     console.log(chalk.cyan("\nStarting daemon..."));

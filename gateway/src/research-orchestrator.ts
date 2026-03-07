@@ -10,6 +10,7 @@ import {
   type ChatHistoryMessage,
 } from "./chat-speed.js";
 import { ProfileExtractor } from "../../runtime/src/profile-extractor.js";
+import { ResearchSessionStore } from "../../runtime/src/research-session-store.js";
 
 export interface ResearchSource {
   title: string;
@@ -59,6 +60,8 @@ export interface ResearchTurnInput {
   message: string;
   history: ChatHistoryMessage[];
   sessionId?: string;
+  onProgress?: (stage: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface ResearchOrchestratorConfig {
@@ -67,6 +70,7 @@ export interface ResearchOrchestratorConfig {
   maxSources: number;
   enableTelemetry: boolean;
   provider: "openai" | "anthropic";
+  sessionStore?: ResearchSessionStore;
 }
 
 type ToolExecutionResult = {
@@ -81,6 +85,7 @@ const DEFAULT_ERROR_RESPONSE =
 export class ResearchOrchestrator {
   private readonly reasoningEngine: ReasoningEngine;
   private readonly profileExtractor: ProfileExtractor | null;
+  private readonly researchSessionStore: ResearchSessionStore;
 
   constructor(
     private readonly runtime: Runtime,
@@ -88,6 +93,8 @@ export class ResearchOrchestrator {
     private readonly config: ResearchOrchestratorConfig,
   ) {
     this.reasoningEngine = new ReasoningEngine(agent, { mode: "full" });
+    this.researchSessionStore =
+      config.sessionStore || new ResearchSessionStore();
 
     // Dedicated cheap agent for profile extraction
     try {
@@ -153,7 +160,10 @@ export class ResearchOrchestrator {
       24,
     );
 
-    // Run OODA reasoning loop — logs traces to ~/.nova/reasoning.log
+    // Run OODA reasoning loop — skip on follow-up turns where session context
+    // already guides the model, saving 3 LLM calls (#5+6)
+    const priorSession = this.researchSessionStore.getActive(userId);
+
     try {
       const memoryContext = this.getMemoryContext(input.message);
       const oodaResult = await this.reasoningEngine.runOODA({
@@ -201,9 +211,25 @@ export class ResearchOrchestrator {
     let usedWebTool = false;
     const toolResults: ToolExecutionResult[] = [];
 
+    // If a prior research session exists, inject context so the agent knows about it
+    if (priorSession) {
+      modelHistory = [
+        ...modelHistory.slice(0, -1),
+        {
+          role: "system",
+          content: [
+            `[Research context] Active research session on "${priorSession.topic}" (confidence: ${priorSession.confidence}).`,
+            `Open questions: ${JSON.stringify(priorSession.openQuestions?.slice(0, 5) || [])}`,
+            `Use deep_research to continue this session. If user says "start over" or "new topic", pass resetSession: true.`,
+          ].join("\n"),
+        },
+        modelHistory[modelHistory.length - 1],
+      ];
+    }
+
     for (
       let iteration = 0;
-      iteration < this.config.maxIterations;
+      !finalText && iteration < this.config.maxIterations;
       iteration++
     ) {
       metrics.iteration_count = iteration + 1;
@@ -248,21 +274,54 @@ export class ResearchOrchestrator {
           const toolName = toolCall.name;
           metrics.tool_calls++;
           if (
-            toolName === "search_web" ||
-            toolName === "fetch_url" ||
-            toolName === "extract_main_content"
+            toolName === "web_search" ||
+            toolName === "scrape" ||
+            toolName === "browse" ||
+            toolName === "deep_research"
           ) {
             usedWebTool = true;
+          }
+
+          // Check abort signal before tool execution
+          if (input.signal?.aborted) {
+            console.log("   ⛔ Research aborted by user.");
+            finalText =
+              "Research was stopped. Here's what I found so far:\n\n" +
+                toolResults
+                  .filter((tr) => tr.result)
+                  .map(
+                    (tr) =>
+                      `• ${tr.toolName}: ${String(tr.result).slice(0, 200)}`,
+                  )
+                  .join("\n") || "No findings yet.";
+            break;
           }
 
           this.pushEvent(events, "tool_start", {
             name: toolName,
             parameters: toolCall.parameters,
           });
+
+          // Emit progress for Telegram
+          if (toolName === "deep_research") {
+            const topic = (toolCall.parameters as any)?.topic || "your query";
+            input.onProgress?.(
+              `🔍 Researching: "${String(topic).slice(0, 80)}"...`,
+            );
+          } else if (toolName === "web_search") {
+            input.onProgress?.("🌐 Searching the web...");
+          } else if (toolName === "scrape" || toolName === "browse") {
+            input.onProgress?.("📄 Reading sources...");
+          }
+
           console.log(
             `🔧 Tool call: ${toolName}`,
             JSON.stringify(toolCall.parameters).slice(0, 200),
           );
+
+          // Per-tool timeout: 10 min for deep_research, config default for others
+          const toolTimeout =
+            toolName === "deep_research" ? 600_000 : this.config.toolTimeoutMs;
 
           // Retry once for transient errors (timeout, network)
           let lastToolError: string | undefined;
@@ -275,22 +334,23 @@ export class ResearchOrchestrator {
                 this.runtime.executeTool(toolName, toolCall.parameters, {
                   sessionId: userId,
                 }),
-                this.config.toolTimeoutMs,
-                `Tool '${toolName}' timed out after ${this.config.toolTimeoutMs}ms`,
+                toolTimeout,
+                `Tool '${toolName}' timed out after ${toolTimeout}ms`,
               );
               metrics.time_tools_ms += performance.now() - toolStart;
               toolResults.push({ toolName, result });
 
+              const toolMaxChars = toolName === "deep_research" ? 8000 : 1200;
               if (this.config.provider === "openai" && toolCall.id) {
                 modelHistory.push({
                   role: "tool",
                   tool_call_id: toolCall.id,
-                  content: truncateToolContent(result),
+                  content: truncateToolContent(result, toolMaxChars),
                 });
               } else {
                 modelHistory.push({
                   role: "assistant",
-                  content: `Used tool ${toolName}: ${truncateToolContent(result)}`,
+                  content: `Used tool ${toolName}: ${truncateToolContent(result, toolMaxChars)}`,
                 });
               }
 
@@ -298,6 +358,9 @@ export class ResearchOrchestrator {
                 name: toolName,
                 success: true,
               });
+              if (toolName === "deep_research") {
+                input.onProgress?.("📝 Synthesizing findings...");
+              }
               toolSucceeded = true;
               console.log(
                 `✅ Tool success: ${toolName} (${(performance.now() - toolStart).toFixed(0)}ms)`,
@@ -337,6 +400,8 @@ export class ResearchOrchestrator {
                 "Make sure you called web_observe first to see the page elements. Try with a different target (use text, placeholder, or name instead of CSS selectors).",
               web_observe:
                 "The session may have ended. Try web_session_start again.",
+              deep_research:
+                "Try reducing scope or specifying focus hints (e.g. regulation, risks, market impact).",
             };
             const hint =
               fallbackHints[toolName] || "Try a different tool or approach.";
@@ -532,8 +597,9 @@ export class ResearchOrchestrator {
     toolResults: ToolExecutionResult[],
   ): string {
     return [
-      "Produce a final user-facing answer now.",
-      "Use the available tool results as evidence.",
+      "Produce a comprehensive, detailed, user-facing answer now.",
+      "Include all key findings, supporting evidence, different viewpoints, and specific details from the tool results.",
+      "Do NOT summarize briefly — the user expects a thorough, in-depth response.",
       "Return JSON only with shape:",
       `{"answer":"...","sources":[{"title":"...","url":"https://...","whyRelevant":"..."}],"uncertainty":"...","confidence":0.0}`,
       `Task: ${task}`,
@@ -548,6 +614,7 @@ export class ResearchOrchestrator {
   ): string {
     return [
       "Rewrite this answer with explicit citations from the provided tool evidence.",
+      "Keep the answer comprehensive and detailed — preserve all findings, viewpoints, and specific data. Do NOT shorten it.",
       "Return JSON only with shape:",
       `{"answer":"...","sources":[{"title":"...","url":"https://...","whyRelevant":"..."}],"uncertainty":"...","confidence":0.0}`,
       `Task: ${task}`,
@@ -677,10 +744,24 @@ function parseJsonObject(text: string): unknown | null {
   try {
     return JSON.parse(trimmed);
   } catch {
-    const match = trimmed.match(/\{[\s\S]*\}/);
-    if (!match) return null;
+    // Balanced-brace matching instead of greedy regex
+    const start = trimmed.indexOf("{");
+    if (start < 0) return null;
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < trimmed.length; i++) {
+      if (trimmed[i] === "{") depth++;
+      else if (trimmed[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end < 0) return null;
     try {
-      return JSON.parse(match[0]);
+      return JSON.parse(trimmed.slice(start, end + 1));
     } catch {
       return null;
     }

@@ -100,6 +100,7 @@ export class TelegramChannel {
   private lastError: string | undefined;
   private botUsername: string | undefined;
   private pollPromise: Promise<void> | undefined;
+  private readonly activeResearch = new Map<number, AbortController>();
 
   constructor(
     private readonly config: TelegramChannelConfig,
@@ -277,7 +278,40 @@ export class TelegramChannel {
     }
 
     const startedAt = performance.now();
+
+    // Check if the user wants to cancel an ongoing research
+    if (isCancelPhrase(text) && this.activeResearch.has(chatId)) {
+      const controller = this.activeResearch.get(chatId);
+      controller?.abort();
+      this.activeResearch.delete(chatId);
+      await this.sendMessage(
+        chatId,
+        "⛔ Research stopped. Send a new message to start fresh.",
+      );
+      console.log(
+        `   ⛔ [Telegram] User cancelled active research for chat ${chatId}`,
+      );
+      return;
+    }
+
     const stopThinking = this.startThinkingIndicator(chatId);
+    const abortController = new AbortController();
+    this.activeResearch.set(chatId, abortController);
+
+    // Progress message: send an editable status message and update it
+    let progressMessageId: number | undefined;
+    const onProgress = async (stage: string) => {
+      try {
+        if (progressMessageId) {
+          await this.editMessage(chatId, progressMessageId, stage);
+        } else {
+          progressMessageId = await this.sendMessageAndGetId(chatId, stage);
+        }
+      } catch {
+        // Progress updates are best-effort
+      }
+    };
+
     try {
       // Download photo if present
       let imageBase64: string | undefined;
@@ -295,9 +329,17 @@ export class TelegramChannel {
         historyKey: `telegram:${chatId}`,
         channel: "telegram",
         imageBase64,
+        onProgress,
+        signal: abortController.signal,
       });
 
       stopThinking();
+      this.activeResearch.delete(chatId);
+
+      // Delete the progress message before sending the final response
+      if (progressMessageId) {
+        await this.deleteMessage(chatId, progressMessageId).catch(() => {});
+      }
 
       const responseText = buildTelegramResponse(
         result.response,
@@ -329,11 +371,15 @@ export class TelegramChannel {
       );
     } catch (error) {
       console.error("telegram message handling error:", error);
+      if (progressMessageId) {
+        await this.deleteMessage(chatId, progressMessageId).catch(() => {});
+      }
       await this.sendMessage(chatId, "Sorry, I ran into an error.", false);
     } finally {
       // Always drain pending images to prevent stale images leaking into next request
       drainPendingImages();
       stopThinking();
+      this.activeResearch.delete(chatId);
     }
   }
 
@@ -367,6 +413,57 @@ export class TelegramChannel {
       text: useHtml ? markdownToTelegramHtml(text) : text,
       parse_mode: useHtml ? "HTML" : undefined,
       disable_web_page_preview: true,
+    });
+  }
+
+  /**
+   * Send a message and return its message_id for later editing/deleting.
+   */
+  private async sendMessageAndGetId(
+    chatId: number,
+    text: string,
+  ): Promise<number> {
+    const result = await this.callTelegramApi<{ message_id: number }>(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text,
+        disable_web_page_preview: true,
+      },
+    );
+    return result.message_id;
+  }
+
+  /**
+   * Edit an existing message by message_id.
+   */
+  private async editMessage(
+    chatId: number,
+    messageId: number,
+    text: string,
+  ): Promise<void> {
+    try {
+      await this.callTelegramApi("editMessageText", {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        disable_web_page_preview: true,
+      });
+    } catch {
+      // Edit can fail if message is identical or already deleted — ignore
+    }
+  }
+
+  /**
+   * Delete a message by message_id (best-effort).
+   */
+  private async deleteMessage(
+    chatId: number,
+    messageId: number,
+  ): Promise<void> {
+    await this.callTelegramApi("deleteMessage", {
+      chat_id: chatId,
+      message_id: messageId,
     });
   }
 
@@ -691,6 +788,21 @@ function parseCommand(text: string): string | null {
   if (!firstToken.startsWith("/")) return null;
   const [command] = firstToken.split("@");
   return command.toLowerCase();
+}
+
+const CANCEL_PHRASES = new Set([
+  "stop",
+  "cancel",
+  "abort",
+  "stop research",
+  "cancel research",
+  "stop it",
+  "nevermind",
+  "never mind",
+]);
+
+function isCancelPhrase(text: string): boolean {
+  return CANCEL_PHRASES.has(text.toLowerCase().trim());
 }
 
 function splitTelegramMessage(text: string, maxLength: number): string[] {

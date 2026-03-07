@@ -1,6 +1,6 @@
 {
   "name": "novaa-agent",
-  "version": "0.1.4",
+  "version": "0.1.12",
   "description": "Next-generation AI super agent",
   "private": false,
   "bin": {
@@ -10,18 +10,22 @@
     "access": "public"
   },
   "files": [
+    "README.md",
+    "LICENSE",
     "runtime/dist",
+    "runtime/src",
     "gateway/dist",
     "gateway/src",
     "agent/dist",
+    "agent/src",
     "cli/dist",
+    "cli/src",
     "cli/bin",
+    "skills",
     "runtime/package.json",
     "gateway/package.json",
     "agent/package.json",
-    "cli/package.json",
-    "README.md",
-    "LICENSE"
+    "cli/package.json"
   ],
   "type": "module",
   "workspaces": [
@@ -51,7 +55,12 @@
     "demo:memory": "tsx examples/memory-demo.ts",
     "demo:multi-agent": "tsx examples/multi-agent-demo.ts",
     "demo:reminders": "tsx examples/reminders-demo.ts",
-    "benchmark:chat": "tsx scripts/benchmark-chat.ts"
+    "nova:use-local": "bash scripts/use-local.sh",
+    "nova:use-npm": "bash scripts/use-npm.sh",
+    "benchmark:chat": "tsx scripts/benchmark-chat.ts",
+    "version:sync": "node scripts/sync-version.js",
+    "version:patch": "npm version patch --no-git-tag-version",
+    "release": "npm run version:patch && npm run version:sync && npm run build && npm publish"
   },
   "devDependencies": {
     "@types/jsdom": "^27.0.0",
@@ -102,6 +111,7 @@
     "gray-matter": "^4.0.3",
     "hnswlib-node": "^3.0.0",
     "inquirer": "^13.2.2",
+    "@inquirer/prompts": "^8.2.0",
     "isolated-vm": "^4.7.2",
     "jsdom": "^28.1.0",
     "jsonwebtoken": "^9.0.2",

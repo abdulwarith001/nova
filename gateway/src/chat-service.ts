@@ -29,6 +29,8 @@ export interface ChatTurnInput {
   historyKey: string;
   channel: "ws" | "telegram";
   imageBase64?: string;
+  onProgress?: (stage: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface ChatTurnOutput {
@@ -108,6 +110,8 @@ export class ChatService {
         message: userMessage,
         history,
         sessionId: input.sessionId,
+        onProgress: input.onProgress,
+        signal: input.signal,
       });
 
       this.histories.set(input.historyKey, result.history);
@@ -306,6 +310,27 @@ export class ChatService {
     if (this.config.skillsSummary) {
       parts.push("", this.config.skillsSummary);
     }
+
+    // Tool decision guide — helps the agent pick the right tool on the first try
+    parts.push(
+      "",
+      [
+        "## Tool Decision Guide",
+        "",
+        "When the user asks for information, pick the RIGHT tool on the first try:",
+        "",
+        "| Need | Tool | Example |",
+        "|------|------|---------|",
+        '| Quick fact or news headline | `web_search` | "what\'s the weather" |',
+        '| Read a specific article or URL | `scrape` | "summarize this link" |',
+        '| See what a page looks like | `browse` | "check out example.com" |',
+        '| Fill a form or click buttons | `web_session_start` → `web_act` | "log in to my account" |',
+        '| In-depth research, comparison, evidence | `deep_research` | "research EU AI policy" |',
+        "",
+        "**deep_research** handles web_search + scrape + browse internally. Never call them separately for the same research topic.",
+        "If you already used deep_research and the user asks a follow-up, call deep_research again — it has session memory.",
+      ].join("\n"),
+    );
 
     return parts.join("\n");
   }
