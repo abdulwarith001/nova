@@ -1,6 +1,6 @@
 {
   "name": "@nova/agent",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Nova agent intelligence layer",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
