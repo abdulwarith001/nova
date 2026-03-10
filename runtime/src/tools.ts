@@ -2,13 +2,16 @@ import { existsSync } from "fs";
 import { dirname, join } from "path";
 import Piscina from "piscina";
 import { fileURLToPath } from "url";
+import { ConfirmationCallback } from "./executor";
 
 export interface ToolExecutionContext {
   sessionId?: string;
   userId?: string;
+  stepId?: string;
   autonomousExecution?: boolean;
   approvalToken?: string;
   approvalRequestId?: string;
+  confirm?: ConfirmationCallback;
 }
 
 export interface ToolDefinition {

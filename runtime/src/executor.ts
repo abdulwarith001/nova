@@ -1,4 +1,5 @@
 import type { ToolRegistry } from "./tools";
+import type { SecurityManager } from "./security";
 
 export interface ExecutorConfig {
   maxParallel: number;
@@ -22,6 +23,11 @@ export interface ExecutionResult {
   outputs: unknown[];
 }
 
+export type ConfirmationCallback = (
+  step: ExecutionStep,
+  reason: string,
+) => Promise<boolean>;
+
 /**
  * Parallel task executor with dependency resolution.
  * Delegates actual tool execution to ToolRegistry (which owns the worker pools).
@@ -39,6 +45,8 @@ export class Executor {
   async execute(
     plan: ExecutionPlan,
     tools: ToolRegistry,
+    security?: SecurityManager,
+    confirm?: ConfirmationCallback,
   ): Promise<ExecutionResult> {
     const outputs: unknown[] = [];
 
@@ -50,11 +58,13 @@ export class Executor {
       if (batch.length === 1) {
         // Serial execution
         const step = batch[0];
-        const output = await this.executeStep(step, tools);
+        const output = await this.executeStep(step, tools, security, confirm);
         outputs.push(output);
       } else {
         // Parallel execution
-        const promises = batch.map((step) => this.executeStep(step, tools));
+        const promises = batch.map((step) =>
+          this.executeStep(step, tools, security, confirm),
+        );
         const batchOutputs = await Promise.all(promises);
         outputs.push(...batchOutputs);
       }
@@ -72,8 +82,27 @@ export class Executor {
   private async executeStep(
     step: ExecutionStep,
     tools: ToolRegistry,
+    security?: SecurityManager,
+    confirm?: ConfirmationCallback,
   ): Promise<unknown> {
     try {
+      // 1. Check for HitL confirmation
+      if (security && confirm) {
+        const hitl = security.requiresConfirmation(step);
+        if (hitl.required) {
+          const approved = await confirm(
+            step,
+            hitl.reason || "Action requires confirmation",
+          );
+          if (!approved) {
+            throw new Error(
+              `Action cancelled: ${hitl.reason || "User denied permission"}`,
+            );
+          }
+        }
+      }
+
+      // 2. Execute
       return await tools.execute(step.toolName, step.parameters);
     } catch (error) {
       console.error(`Error executing step ${step.id}:`, error);

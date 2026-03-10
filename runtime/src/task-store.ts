@@ -13,7 +13,12 @@ import { randomUUID } from "crypto";
 // ── Types ───────────────────────────────────────────────────────────────────
 
 export type TaskKind = "reminder" | "recurring" | "task";
-export type TaskStatus = "active" | "triggered" | "cancelled" | "paused";
+export type TaskStatus =
+  | "active"
+  | "triggered"
+  | "cancelled"
+  | "paused"
+  | "failed";
 
 export interface TaskItem {
   id: string;
@@ -34,6 +39,10 @@ export interface TaskItem {
   chatId?: string;
   /** Extra context (JSON-serializable) */
   context?: Record<string, unknown>;
+  /** Error tracking & Retries */
+  retries?: number;
+  maxRetries?: number;
+  lastError?: string;
   createdAt: number;
 }
 
@@ -46,6 +55,7 @@ export interface CreateTaskInput {
   schedule?: string;
   timeOfDay?: string;
   chatId?: string;
+  maxRetries?: number;
   context?: Record<string, unknown>;
 }
 
@@ -105,6 +115,8 @@ export class TaskStore {
       nextRun: input.nextRun,
       status: "active",
       chatId: input.chatId,
+      retries: 0,
+      maxRetries: input.maxRetries ?? 3,
       context: input.context,
       createdAt: Date.now(),
     };
@@ -181,6 +193,33 @@ export class TaskStore {
     }
 
     this.items.splice(index, 1);
+    this.save();
+  }
+
+  /**
+   * Mark a task as failed and schedule a retry if possible.
+   */
+  handleFailure(id: string, error: string): void {
+    const item = this.items.find((i) => i.id === id);
+    if (!item) return;
+
+    item.lastError = error;
+    item.retries = (item.retries || 0) + 1;
+
+    const max = item.maxRetries ?? 3;
+    if (item.retries >= max) {
+      item.status = "failed";
+      console.error(
+        `❌ Task "${item.message}" failed permanently after ${item.retries} attempts.`,
+      );
+    } else {
+      // Exponential backoff: 1m, 2m, 4m...
+      const delayMs = Math.pow(2, item.retries - 1) * 60_000;
+      item.nextRun = Date.now() + delayMs;
+      console.warn(
+        `🔄 Task "${item.message}" failed (attempt ${item.retries}/${max}). Retrying in ${delayMs / 1000}s.`,
+      );
+    }
     this.save();
   }
 

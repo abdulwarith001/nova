@@ -77,6 +77,8 @@ async function start() {
     apiKey: process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY,
   };
 
+  let plannerChat: ((prompt: string) => Promise<string>) | undefined;
+
   const runtime = await Runtime.create({
     security: {
       allowedTools: ["*"],
@@ -85,6 +87,14 @@ async function start() {
     executor: {
       maxParallel: 4,
       defaultTimeoutMs: 30000,
+    },
+    planner: {
+      llmChat: async (prompt: string) => {
+        if (!plannerChat) {
+          throw new Error("Planner LLM chat not initialized yet");
+        }
+        return await plannerChat(prompt);
+      },
     },
   });
   console.log("✅ Runtime initialized");
@@ -96,25 +106,29 @@ async function start() {
   console.log("✅ Loaded IDENTITY.md + RULES.md");
 
   const agent = new Agent(agentConfig, identityContent);
+  plannerChat = async (prompt: string) => agent.chat(prompt);
 
   // Get tools from Runtime in agent-compatible format
   const allTools = runtime.getToolsForAgent();
   console.log(`📋 Loaded ${allTools.length} tools`);
 
   // === Wire tools that need runtime references ===
-  const { wireSkillTools, wireProfileTools } = await import("./tool-wiring.js");
-  await wireSkillTools(runtime, agent);
-  wireProfileTools(runtime);
-
-  // Build skill index for system prompt injection
   const { SkillLoader } = await import("../../runtime/src/skill-loader.js");
+  const { SkillBuilder } = await import("../../runtime/src/skill-builder.js");
   const skillLoader = new SkillLoader();
+  const skillBuilder = new SkillBuilder();
+
   const projectRoot = (await import("path")).resolve(
     (await import("url")).fileURLToPath(import.meta.url),
     "../../..",
   );
-  skillLoader.buildIndex(SkillLoader.getDefaultDirs(projectRoot));
+  skillLoader.init(SkillLoader.getDefaultDirs(projectRoot));
   const skillsSummary = skillLoader.getIndexSummary();
+
+  const { wireSkillTools, wireProfileTools } = await import("./tool-wiring.js");
+  await wireSkillTools(runtime, agent, { skillLoader, skillBuilder });
+  wireProfileTools(runtime);
+
   console.log(
     `📋 Skill index: ${skillLoader.getIndex().length} skills available`,
   );
@@ -238,6 +252,13 @@ async function start() {
                   sessionId,
                   historyKey,
                   channel: "ws",
+                  confirm: async (step, reason) => {
+                    console.log(
+                      `🛡️ HitL Confirmation required (WS): ${reason}`,
+                    );
+                    // For now, WS just logs and auto-approves or could wait for a specific 'approve' message
+                    return true;
+                  },
                 });
 
                 const payload: Record<string, unknown> = {
@@ -412,6 +433,16 @@ async function start() {
           sessionId: `task:${tick.item.id}`,
           historyKey: `task:reminder:${tick.item.id}`,
           channel: "telegram",
+          confirm: async (step, reason) => {
+            if (isConnected && ownerChatId) {
+              return await telegramChannel.askConfirmation(
+                ownerChatId,
+                `${reason}\n\n<b>Action:</b> ${step.toolName}\n<b>Target:</b> ${step.id}`,
+                `confirm_${tick.item.id}_${step.id}`,
+              );
+            }
+            return false;
+          },
         });
 
         if (result.response && isConnected && ownerChatId) {
@@ -429,6 +460,16 @@ async function start() {
           sessionId: `task:${tick.item.id}`,
           historyKey: `task:${tick.item.kind}:${tick.item.id}`,
           channel: "telegram",
+          confirm: async (step, reason) => {
+            if (isConnected && ownerChatId) {
+              return await telegramChannel.askConfirmation(
+                ownerChatId,
+                `${reason}\n\n<b>Action:</b> ${step.toolName}\n<b>Step:</b> ${step.id}`,
+                `confirm_${tick.item.id}_${step.id}`,
+              );
+            }
+            return false;
+          },
         });
 
         if (result.response && isConnected && ownerChatId) {

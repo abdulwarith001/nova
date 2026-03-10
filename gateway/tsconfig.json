@@ -12,7 +12,12 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@nova/agent": ["../agent/src/index.ts"],
+      "@nova/agent/*": ["../agent/src/*"]
+    }
   },
   "include": ["src/**/*", "../runtime/src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]

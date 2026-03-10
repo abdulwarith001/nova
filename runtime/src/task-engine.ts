@@ -78,21 +78,33 @@ export class TaskEngine {
         const tick: TaskTick = { item, triggeredAt: now };
         fired.push(tick);
 
-        // Mark/advance item BEFORE running handler to prevent
-        // the next tick from picking up the same item
-        if (item.kind === "recurring" && item.schedule) {
-          this.store.advanceRecurring(item.id);
-        } else {
-          // One-shot: reminder or task — remove immediately
-          this.store.markTriggered(item.id);
-        }
-
         // Execute handler
         if (this.handler) {
           try {
             await this.handler(tick);
+
+            // 1. Success: Complete or advance
+            if (item.kind === "recurring" && item.schedule) {
+              this.store.advanceRecurring(item.id);
+            } else {
+              this.store.markTriggered(item.id);
+            }
           } catch (err) {
-            console.error(`⚠️ Task handler error for "${item.message}":`, err);
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.error(
+              `⚠️ Task handler error for "${item.message}":`,
+              errMsg,
+            );
+
+            // 2. Failure: Use store logic for retries
+            this.store.handleFailure(item.id, errMsg);
+          }
+        } else {
+          // No handler? Still need to move it out of 'due'
+          if (item.kind === "recurring" && item.schedule) {
+            this.store.advanceRecurring(item.id);
+          } else {
+            this.store.markTriggered(item.id);
           }
         }
       }

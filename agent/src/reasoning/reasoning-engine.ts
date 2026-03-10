@@ -10,7 +10,6 @@ import {
   DecisionResult,
   OODAState,
   OODAThought,
-  OODARunResult,
   ObservationResult,
   OrientationResult,
   ReasoningContext,
@@ -20,6 +19,8 @@ import {
   ThinkingResult,
   ThoughtChainContext,
   PlanStep,
+  OODARunResult,
+  WebOODAResult,
 } from "./types.js";
 
 export class ReasoningEngine {
@@ -468,6 +469,73 @@ export class ReasoningEngine {
             : 0.5,
       },
       assembledThinking: result.assembledThinking,
+    };
+  }
+
+  /**
+   * Run a specialized OODA loop for web interaction.
+   * Analyzes page elements and goal to pick the next browser action.
+   */
+  async runWebOODA(input: {
+    goal: string;
+    observationSnippet: string;
+    history?: string[];
+    identity?: string;
+    rules?: string[];
+  }): Promise<WebOODAResult> {
+    if (!this.llmChat) {
+      throw new Error("ReasoningEngine initialized without LLM capabilities.");
+    }
+
+    // 1. ORIENT: Analyze the page vs goal
+    const orientPrompt = [
+      REASONING_PROMPTS.system,
+      input.identity ? `Your Identity:\n${input.identity}` : "",
+      input.rules?.length ? `Your Rules:\n${input.rules.join("\n")}` : "",
+      REASONING_PROMPTS.webOrient,
+      `Goal: ${input.goal}`,
+      `Current Page Snippet:\n${input.observationSnippet}`,
+      input.history?.length
+        ? `Last few actions:\n${input.history.slice(-3).join("\n")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const orientRaw = await this.llmChat(orientPrompt, []);
+    const orientParsed = this.chainOfThought?.parseJson(orientRaw) as any;
+
+    const orientThought: OODAThought = {
+      phase: "orient",
+      content: `Page: ${orientParsed?.pageSummary}. Approach: ${orientParsed?.approach}. Status: ${orientParsed?.status}`,
+      confidence: orientParsed?.confidence || 0.7,
+      timestamp: Date.now(),
+    };
+
+    // 2. DECIDE: Pick the exact action
+    const decidePrompt = [
+      REASONING_PROMPTS.system,
+      REASONING_PROMPTS.webDecide,
+      `Goal: ${input.goal}`,
+      `Previous Thinking:\n[ORIENT] ${orientThought.content}`,
+      `Current Page Snippet:\n${input.observationSnippet}`,
+    ].join("\n\n");
+
+    const decideRaw = await this.llmChat(decidePrompt, []);
+    const decideParsed = this.chainOfThought?.parseJson(decideRaw) as any;
+
+    const action = decideParsed?.action || { type: "extract" };
+    const rationale = decideParsed?.rationale || "Defaulting to extraction.";
+
+    return {
+      thoughts: [orientThought],
+      decision: {
+        action,
+        rationale,
+        risk: decideParsed?.risk || "low",
+        needsConfirmation: !!decideParsed?.needsConfirmation,
+        confidence: decideParsed?.confidence || 0.7,
+      },
     };
   }
 }

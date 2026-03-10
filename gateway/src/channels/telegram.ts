@@ -1,3 +1,6 @@
+import { join } from "path";
+import { homedir } from "os";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import type { ChatService } from "../chat-service.js";
 import { drainPendingImages } from "../../../runtime/src/pending-images.js";
 import {
@@ -54,6 +57,12 @@ interface TelegramMessage {
 interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: {
+    id: string;
+    from: TelegramUser;
+    message?: TelegramMessage;
+    data: string;
+  };
 }
 
 interface TelegramMe {
@@ -96,16 +105,51 @@ export class TelegramChannel {
   private running = false;
   private connected = false;
   private lastUpdateId = 0;
+  private readonly statePath: string;
   private lastErrorAt: string | undefined;
   private lastError: string | undefined;
   private botUsername: string | undefined;
   private pollPromise: Promise<void> | undefined;
   private readonly activeResearch = new Map<number, AbortController>();
+  private readonly pendingConfirmations = new Map<
+    string,
+    (approved: boolean) => void
+  >();
 
   constructor(
     private readonly config: TelegramChannelConfig,
     private readonly chatService: ChatService,
-  ) {}
+  ) {
+    this.statePath = join(homedir(), ".nova", "telegram-state.json");
+    this.loadState();
+  }
+
+  private loadState(): void {
+    try {
+      if (existsSync(this.statePath)) {
+        const raw = readFileSync(this.statePath, "utf-8");
+        const data = JSON.parse(raw);
+        if (data && data.lastUpdateId) {
+          this.lastUpdateId = data.lastUpdateId;
+          console.log(`📨 [Telegram] Resumed from update ${this.lastUpdateId}`);
+        }
+      }
+    } catch (err) {
+      // Ignore
+    }
+  }
+
+  private async saveState(): Promise<void> {
+    try {
+      writeFileSync(
+        this.statePath,
+        JSON.stringify({ lastUpdateId: this.lastUpdateId }),
+        "utf-8",
+      );
+    } catch (err) {
+      // Ignore
+    }
+  }
 
   async start(): Promise<void> {
     if (!this.config.enabled) {
@@ -175,11 +219,58 @@ export class TelegramChannel {
     };
   }
 
-  /**
-   * Send a proactive message to a chat ID (used by heartbeat engine).
-   */
   async sendProactiveMessage(chatId: number, text: string): Promise<void> {
     await this.streamDelivery(chatId, text);
+  }
+
+  /**
+   * Ask the user for confirmation via an interactive message.
+   */
+  async askConfirmation(
+    chatId: number,
+    text: string,
+    actionId: string,
+  ): Promise<boolean> {
+    const messageId = await this.callTelegramApi<{ message_id: number }>(
+      "sendMessage",
+      {
+        chat_id: chatId,
+        text: `🛡️ <b>Security Confirmation Required</b>\n\n${text}`,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Approve", callback_data: `confirm_ok:${actionId}` },
+              { text: "❌ Deny", callback_data: `confirm_no:${actionId}` },
+            ],
+          ],
+        },
+      },
+    ).then((res) => res.message_id);
+
+    return new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(
+        () => {
+          this.pendingConfirmations.delete(actionId);
+          this.editMessage(chatId, messageId, "⌛ Confirmation timed out.")
+            .catch(() => {})
+            .finally(() => resolve(false));
+        },
+        5 * 60 * 1000,
+      ); // 5 minute timeout
+
+      this.pendingConfirmations.set(actionId, (approved: boolean) => {
+        clearTimeout(timeout);
+        this.pendingConfirmations.delete(actionId);
+        this.editMessage(
+          chatId,
+          messageId,
+          approved ? "✅ Action Approved" : "❌ Action Denied",
+        )
+          .catch(() => {})
+          .finally(() => resolve(approved));
+      });
+    });
   }
 
   private async pollLoop(): Promise<void> {
@@ -194,8 +285,23 @@ export class TelegramChannel {
       try {
         const updates = await this.getUpdates(this.lastUpdateId + 1);
         for (const update of updates) {
-          this.lastUpdateId = Math.max(this.lastUpdateId, update.update_id);
-          await this.handleUpdate(update);
+          if (update.update_id > this.lastUpdateId) {
+            this.lastUpdateId = update.update_id;
+            await this.saveState();
+          }
+
+          // Callback queries (button clicks) must be processed synchronously
+          // so they can resolve pending HitL confirmations immediately.
+          // Message updates are processed asynchronously so the poll loop
+          // continues fetching — this prevents the deadlock where the loop
+          // blocks on message processing and can never receive the callback.
+          if (update.callback_query) {
+            await this.handleUpdate(update);
+          } else {
+            void this.handleUpdate(update).catch((err) => {
+              console.error("📨 [Telegram] Error handling update:", err);
+            });
+          }
         }
         retryMs = this.config.retryBaseMs;
         consecutiveFailures = 0;
@@ -227,8 +333,75 @@ export class TelegramChannel {
   }
 
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
+    const updateType = update.callback_query
+      ? "callback_query"
+      : update.message
+        ? "message"
+        : "unknown";
+    console.log(
+      `📨 [Telegram] Update ${update.update_id} (${updateType}) received`,
+    );
+
+    // 1. Handle Callback Queries (Buttons)
+    if (update.callback_query) {
+      const { id, data, message } = update.callback_query;
+      console.log(
+        `📨 [Telegram] Callback Query: id=${id}, data=${data}, msgId=${message?.message_id}`,
+      );
+
+      try {
+        // DO NOT await this, send it and continue so the UI doesn't hang
+        void this.callTelegramApi("answerCallbackQuery", {
+          callback_query_id: id,
+        }).catch((err) => {
+          console.warn(
+            `⚠️ [Telegram] Failed to answer callback query ${id}:`,
+            err,
+          );
+        });
+      } catch (err) {
+        // Sink
+      }
+
+      if (data.startsWith("confirm_")) {
+        const approved = data.startsWith("confirm_ok:");
+        const actionId = data.split(":")[1];
+        const handler = this.pendingConfirmations.get(actionId);
+
+        console.log(
+          `🛡️ [Telegram] HitL Confirmation: ${approved ? "✅ APPROVED" : "❌ DENIED"} (id: ${actionId}, chat: ${message?.chat.id})`,
+        );
+
+        if (handler) {
+          handler(approved);
+        } else {
+          console.warn(`⚠️ [Telegram] No handler for actionId: ${actionId}`);
+          if (message) {
+            try {
+              await this.editMessage(
+                message.chat.id,
+                message.message_id,
+                "⚠️ <b>Request Expired</b>\n\nThis confirmation request is no longer active (likely due to a bot restart). Please try the command again.",
+              );
+            } catch (err) {
+              console.warn(
+                `⚠️ [Telegram] Failed to edit expired message:`,
+                err,
+              );
+            }
+          }
+        }
+      }
+      return;
+    }
+
+    // 2. Handle Messages
     if (!update.message || !update.message.chat) return;
     const message = update.message;
+
+    console.log(
+      `📨 [Telegram] New update ${update.update_id} from chat ${message.chat.id}`,
+    );
     const hasPhoto = !!(message.photo && message.photo.length > 0);
     const hasImageDoc =
       message.document?.mime_type?.startsWith("image/") ?? false;
@@ -330,6 +503,13 @@ export class TelegramChannel {
         channel: "telegram",
         imageBase64,
         onProgress,
+        confirm: async (step, reason) => {
+          return await this.askConfirmation(
+            chatId,
+            `${reason}\n\n<b>Action:</b> ${step.toolName}`,
+            `confirm_${Date.now()}_${step.id}`,
+          );
+        },
         signal: abortController.signal,
       });
 
@@ -399,7 +579,7 @@ export class TelegramChannel {
     return await this.callTelegramApi<TelegramUpdate[]>("getUpdates", {
       offset,
       timeout: this.config.pollTimeoutSec,
-      allowed_updates: ["message"],
+      allowed_updates: ["message", "callback_query"],
     });
   }
 
@@ -471,41 +651,6 @@ export class TelegramChannel {
    * Send a streaming draft message using Telegram's sendMessageDraft API.
    * Incrementally updates the message as text is generated.
    */
-  private async sendMessageDraft(
-    chatId: number,
-    text: string,
-    draftId: number,
-    complete = false,
-  ): Promise<void> {
-    try {
-      await this.callTelegramApi("sendMessageDraft", {
-        chat_id: chatId,
-        text,
-        draft_id: draftId,
-        parse_mode: "HTML",
-        complete,
-        disable_web_page_preview: true,
-      });
-    } catch (err: any) {
-      // If sendMessageDraft is not available (older API), fall back silently
-      if (
-        err?.message?.includes("not found") ||
-        err?.message?.includes("unknown method")
-      ) {
-        if (complete) {
-          // Fall back to regular sendMessage for the final text
-          await this.callTelegramApi("sendMessage", {
-            chat_id: chatId,
-            text,
-            parse_mode: "HTML",
-            disable_web_page_preview: true,
-          });
-        }
-        return;
-      }
-      throw err;
-    }
-  }
 
   /**
    * Stream the delivery of an already-generated response to Telegram.
@@ -513,50 +658,60 @@ export class TelegramChannel {
    */
   private async streamDelivery(chatId: number, text: string): Promise<void> {
     // Short responses — just send directly
-    if (text.length < 50) {
+    if (text.length < 150) {
       await this.sendChunkedMessage(chatId, text);
       return;
     }
 
-    const draftId = Date.now();
-    const CHUNK_SIZE = 120;
-    const STEP_DELAY_MS = 60;
+    const CHUNK_SIZE = 160;
+    const STEP_DELAY_MS = 250; // Respect rate limits better
     let cursor = 0;
-    let draftWorked = false;
+    let messageId: number | undefined;
 
     try {
-      // Progressive reveal via drafts
+      // Send initial chunk
+      cursor = Math.min(CHUNK_SIZE, text.length);
+      const initial = text.slice(0, cursor);
+      messageId = await this.sendMessageAndGetId(
+        chatId,
+        formatStreamingChunk(initial),
+      );
+
+      // Progressive reveal via edits
       while (cursor < text.length) {
         cursor = Math.min(cursor + CHUNK_SIZE, text.length);
         if (cursor < text.length) {
+          // Try to break at space for better visual flow
           const nextSpace = text.indexOf(" ", cursor);
-          if (nextSpace !== -1 && nextSpace - cursor < 20) {
+          if (nextSpace !== -1 && nextSpace - cursor < 30) {
             cursor = nextSpace + 1;
           }
         }
+
         const partial = text.slice(0, cursor);
         const formatted = formatStreamingChunk(partial);
-        await this.sendMessageDraft(chatId, formatted, draftId, false);
-        draftWorked = true;
+
+        await this.editMessage(chatId, messageId, formatted);
+
         if (cursor < text.length) {
           await waitMs(STEP_DELAY_MS);
         }
       }
 
-      // Finalize draft
+      // Finalize with full markdown-to-html conversion for the whole text
       const finalHtml = markdownToTelegramHtml(text);
-      await this.sendMessageDraft(chatId, finalHtml, draftId, true);
+      await this.editMessage(chatId, messageId, finalHtml);
     } catch (err: any) {
-      console.warn("Draft streaming failed:", err?.message || err);
-      if (!draftWorked) {
-        // sendMessageDraft not supported — just send normally
-        await this.sendChunkedMessage(chatId, text);
-        return;
+      console.warn(
+        "Progressive delivery failed, falling back to chunked:",
+        err?.message || err,
+      );
+      // If editing failed or initial send failed, try chunked delivery as ultimate fallback
+      if (messageId) {
+        await this.deleteMessage(chatId, messageId).catch(() => {});
       }
+      await this.sendChunkedMessage(chatId, text);
     }
-
-    // Send permanent message
-    await this.sendChunkedMessage(chatId, text);
   }
 
   /**
@@ -565,41 +720,6 @@ export class TelegramChannel {
    * Returns the accumulated full text.
    * @deprecated This method is no longer used directly for streaming responses. Use `streamDelivery` instead.
    */
-  async streamResponse(
-    chatId: number,
-    stream: AsyncGenerator<string>,
-    draftId: number,
-  ): Promise<string> {
-    let accumulated = "";
-    let lastSentAt = 0;
-    const DEBOUNCE_MS = 300;
-
-    for await (const delta of stream) {
-      accumulated += delta;
-      const now = Date.now();
-
-      if (now - lastSentAt >= DEBOUNCE_MS) {
-        const formatted = formatStreamingChunk(accumulated);
-        await this.sendMessageDraft(chatId, formatted, draftId, false).catch(
-          () => {
-            // Swallow draft update errors — final message will be sent below
-          },
-        );
-        lastSentAt = now;
-      }
-    }
-
-    // Finalize draft (best effort) then send permanent message
-    const finalHtml = markdownToTelegramHtml(accumulated);
-    await this.sendMessageDraft(chatId, finalHtml, draftId, true).catch(
-      () => {},
-    );
-
-    // Always send a permanent message so the user has a lasting copy
-    await this.sendChunkedMessage(chatId, accumulated);
-
-    return accumulated;
-  }
 
   /** Download a Telegram file by file_id and return as base64. */
   private async downloadFileAsBase64(fileId: string): Promise<string> {

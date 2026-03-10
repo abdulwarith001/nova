@@ -21,16 +21,21 @@ interface ActiveRoute {
 export class WebSessionManager {
   private readonly providers: Record<WebSessionBackend, BrowserProvider>;
   private readonly routes = new Map<string, ActiveRoute>();
+  readonly localProvider: BrowserProvider;
 
   constructor(
     providers?: Partial<Record<WebSessionBackend, BrowserProvider>>,
     private readonly telemetry = new WebTelemetry(),
   ) {
     this.providers = {
-      local: providers?.local || new LocalPlaywrightProvider(undefined, this.telemetry),
-      browserbase: providers?.browserbase || new BrowserbaseProvider(this.telemetry),
+      local:
+        providers?.local ||
+        new LocalPlaywrightProvider(undefined, this.telemetry),
+      browserbase:
+        providers?.browserbase || new BrowserbaseProvider(this.telemetry),
       steel: providers?.steel || new SteelProvider(this.telemetry),
     };
+    this.localProvider = this.providers.local;
   }
 
   async startSession(
@@ -44,7 +49,9 @@ export class WebSessionManager {
         this.touch(sessionId);
         return snapshot;
       } catch {
-        await this.providers[existing.backend].endSession(sessionId).catch(() => {});
+        await this.providers[existing.backend]
+          .endSession(sessionId)
+          .catch(() => {});
         this.routes.delete(sessionId);
       }
     }
@@ -58,7 +65,10 @@ export class WebSessionManager {
       true;
 
     const tryLocal = async (): Promise<SessionSnapshot> => {
-      const snapshot = await this.providers.local.startSession(sessionId, config);
+      const snapshot = await this.providers.local.startSession(
+        sessionId,
+        config,
+      );
       this.routes.set(sessionId, { backend: "local", config });
       return snapshot;
     };
@@ -68,10 +78,14 @@ export class WebSessionManager {
     }
 
     const shouldTrySteel =
-      preference === "steel" || (preference === "auto" && hasSteelCredentials());
+      preference === "steel" ||
+      (preference === "auto" && hasSteelCredentials());
     if (shouldTrySteel) {
       try {
-        const snapshot = await this.providers.steel.startSession(sessionId, config);
+        const snapshot = await this.providers.steel.startSession(
+          sessionId,
+          config,
+        );
         this.routes.set(sessionId, { backend: "steel", config });
         return snapshot;
       } catch (error) {
@@ -96,10 +110,14 @@ export class WebSessionManager {
     }
 
     const shouldTryBrowserbase =
-      preference === "browserbase" || (preference === "auto" && hasBrowserbaseCredentials());
+      preference === "browserbase" ||
+      (preference === "auto" && hasBrowserbaseCredentials());
     if (shouldTryBrowserbase) {
       try {
-        const snapshot = await this.providers.browserbase.startSession(sessionId, config);
+        const snapshot = await this.providers.browserbase.startSession(
+          sessionId,
+          config,
+        );
         this.routes.set(sessionId, { backend: "browserbase", config });
         return snapshot;
       } catch (error) {
@@ -129,7 +147,9 @@ export class WebSessionManager {
   getPage(sessionId: string): Page {
     const route = this.routes.get(sessionId);
     if (!route) {
-      throw new Error(`No active web session for '${sessionId}'. Start one with web_session_start.`);
+      throw new Error(
+        `No active web session for '${sessionId}'. Start one with web_session_start.`,
+      );
     }
     return this.providers[route.backend].getPage(sessionId);
   }
@@ -201,7 +221,9 @@ function parseOptionalBool(value: unknown): boolean | undefined {
 }
 
 function resolveBackendPreference(value: unknown): WebBackendPreference {
-  const normalized = String(value || "auto").trim().toLowerCase();
+  const normalized = String(value || "auto")
+    .trim()
+    .toLowerCase();
   if (normalized === "local") return "local";
   if (normalized === "browserbase") return "browserbase";
   if (normalized === "steel") return "steel";

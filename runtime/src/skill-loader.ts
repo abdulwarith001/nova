@@ -33,15 +33,31 @@ export interface SkillToolDefinition {
 export class SkillLoader {
   private index: SkillManifest[] = [];
   private loaded: Map<string, SkillToolDefinition[]> = new Map();
+  private scanDirs: string[] = [];
+
+  /**
+   * Set the search directories and build the initial index.
+   */
+  init(dirs: string[]): SkillManifest[] {
+    this.scanDirs = [...new Set(dirs)];
+    return this.refreshIndex();
+  }
 
   /**
    * Build the skill index by scanning directories for SKILL.md files.
-   * Only reads manifest metadata — does NOT load tool code.
+   * @deprecated Use init() and refreshIndex() instead.
    */
   buildIndex(dirs: string[]): SkillManifest[] {
+    return this.init(dirs);
+  }
+
+  /**
+   * Re-scan the registered directories to update the skill index.
+   */
+  refreshIndex(): SkillManifest[] {
     this.index = [];
 
-    for (const dir of dirs) {
+    for (const dir of this.scanDirs) {
       if (!existsSync(dir)) continue;
 
       const entries = readdirSync(dir);
@@ -63,16 +79,21 @@ export class SkillLoader {
   }
 
   /**
+   * Automatically discover and add new skill directories.
+   * Searches in common locations like ~/.nova/skills.
+   */
+  discoverSkills(): SkillManifest[] {
+    const defaultDirs = SkillLoader.getDefaultDirs();
+    for (const dir of defaultDirs) {
+      if (!this.scanDirs.includes(dir)) {
+        this.scanDirs.push(dir);
+      }
+    }
+    return this.refreshIndex();
+  }
+
+  /**
    * Parse a SKILL.md file into a SkillManifest.
-   *
-   * Expected format:
-   * ---
-   * name: google-workspace
-   * description: Google Workspace integration
-   * capabilities: send email, read email, manage calendar, access Drive
-   * env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
-   * tools: 14
-   * ---
    */
   private parseSkillManifest(
     manifestPath: string,
@@ -153,7 +174,6 @@ export class SkillLoader {
 
   /**
    * Load a skill's tool definitions by name.
-   * Dynamically imports the skill's tools.ts/tools.js module.
    */
   async loadSkill(name: string): Promise<SkillToolDefinition[]> {
     // Return cached if already loaded
@@ -192,7 +212,7 @@ export class SkillLoader {
   }
 
   /**
-   * Search the index for skills matching a capability keyword.
+   * Search the index for skills matching a keyword.
    */
   searchSkills(query: string): SkillManifest[] {
     const queryLower = query.toLowerCase();
@@ -217,7 +237,7 @@ export class SkillLoader {
   }
 
   /**
-   * Get a lightweight summary of all skills for injection into the system prompt.
+   * Get a lightweight summary of all skills.
    */
   getIndexSummary(): string {
     if (this.index.length === 0) {
@@ -229,74 +249,7 @@ export class SkillLoader {
       return `- ${skill.name}: ${skill.description} (${skill.toolCount} tools: ${caps})`;
     });
 
-    return [
-      "=== AVAILABLE SKILLS ===",
-      ...lines,
-      "",
-      "=== WEB INTERACTION RULES ===",
-      "• browse = READ-ONLY (screenshot + text extraction). CANNOT click, fill, or submit.",
-      "• To click buttons, fill forms, submit, log in, or interact with a page, use this flow:",
-      "  1. web_session_start(startUrl: url) → opens browser",
-      "  2. web_observe() → see page elements",
-      '  3. web_act(type: "fill", target: { text: "Email" }, value: "user@test.com")',
-      '  4. web_act(type: "click", target: { text: "Submit" })',
-      "  5. web_session_end() → close browser",
-      "• NEVER say you cannot interact with a page. Use the session tools above.",
-      "",
-      "=== TASK RULES ===",
-      "CRITICAL: When the user mentions ANY time-related action, USE THE TASK TOOLS IMMEDIATELY. Do NOT do the task yourself — schedule it.",
-      "",
-      "TRIGGER PHRASES → ACTIONS:",
-      "• 'remind me in X min/hours' → task_create(kind: 'reminder', delayMinutes: X)",
-      "• 'remind me at 9 AM' → task_create(kind: 'reminder', triggerAt: '<today or tomorrow>T09:00:00')",
-      "• 'every day at 7 AM' → task_create(kind: 'recurring', triggerAt: '<next 7AM>T07:00:00', schedule: '24h')",
-      "• 'in X minutes, do Y' → task_create(kind: 'task', action: 'Y', delayMinutes: X). NEVER do Y immediately — always schedule it.",
-      "",
-      "TIME PARAMETERS (use ONE):",
-      "• triggerAt: ISO 8601 datetime for specific times (e.g. '2026-03-04T09:00:00'). Use the timezone from your system prompt date/time.",
-      "• delayMinutes: minutes from now for relative delays (5 min = 5, 1 hour = 60, 1 day = 1440). NEVER pass milliseconds.",
-      "• If the user does NOT specify a time, ASK once. Never guess.",
-      "",
-      "MODIFYING/DELETING:",
-      "• 'update/change that to X', 'make it every X' → call task_list FIRST to get IDs, then task_update. NEVER ask which tool to use — just do it.",
-      "• When updating a task, update BOTH message AND action together so they stay in sync.",
-      "• To cancel or delete: call task_list FIRST, then task_cancel with the correct ID.",
-      "• NEVER create a duplicate — use task_update to modify existing items.",
-      "",
-      "BE DECISIVE:",
-      "• When you have enough info, CREATE the task immediately. Don't ask 'would you like me to...' — just do it.",
-      "• Keep confirmations to ONE short sentence: 'Done! I'll remind you at 9 AM daily.'",
-      "",
-      "=== IMAGE RULES ===",
-      "• When the user asks to create/draw/generate an image, use generate_image immediately with a detailed prompt.",
-      "• The image will be sent to the user automatically — just confirm what you created.",
-      "• When the user sends you a photo, you can see and analyze it. Describe what you see or answer questions about it.",
-      "• You can understand images sent to you (screenshots, photos, documents, etc).",
-      "• When the user asks for a SCREENSHOT of a website, use browse(url, sendScreenshot: true). The screenshot will be sent automatically.",
-      "• Do NOT set sendScreenshot: true unless the user explicitly asks for a screenshot.",
-      "",
-      "=== COMPUTER ACCESS RULES ===",
-      "You have FULL access to the host computer. You can run commands, read/write files, manage processes, and query system info.",
-      "",
-      "TOOL SELECTION:",
-      "• Quick one-off commands → shell_exec (e.g. 'ls', 'df -h', 'git status', 'brew install X')",
-      "• Multi-step workflows → shell_session_start → shell_session_exec (multiple) → shell_session_end",
-      "  Example: cd into project, install deps, build, test — all in one session that retains cwd and env vars.",
-      "• Read files → file_read. Write/create files → file_write. List dirs → file_list.",
-      "• System info → system_info. Find processes → process_list. Kill process → process_kill.",
-      "• Open apps → open_app. Take screenshots → screenshot(send: true). Read/write clipboard → clipboard.",
-      "• Send desktop notifications → notify. Check ports → port_info.",
-      "",
-      "BEST PRACTICES:",
-      "• WORKSPACE: When creating files (scripts, websites, documents, code), ALWAYS write them to ~/.nova/workspace/. NEVER write to the Nova project source directory or any system directory. Create subdirectories as needed (e.g. ~/.nova/workspace/sub-folder/).",
-      "• SCREENSHOTS: Take screenshots BEFORE switching to another app. If asked 'open X, screenshot it, then go back to Y' → open_app(X) → screenshot(send:true) → open_app(Y). NEVER call all three in parallel.",
-      "• Always check exitCode and stderr after shell commands before reporting success.",
-      "• For large outputs, summarize instead of dumping the full output to the user.",
-      "• When creating scripts or config files, use file_write then shell_exec to run them.",
-      "• Close sessions with shell_session_end when done — don't leave them open.",
-      "",
-      "If you need a capability, search your skills. Don't guess — request the skill by name.",
-    ].join("\n");
+    return ["=== AVAILABLE SKILLS ===", ...lines].join("\n");
   }
 
   /**

@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import type { WebSearchResult } from "./contracts.js";
+import type { BrowserProvider } from "./browser-provider.js";
 import {
   canonicalizeUrl,
   dedupeCanonicalUrls,
@@ -19,6 +20,8 @@ interface RawSearchResult {
 }
 
 export class SearchService {
+  constructor(private readonly browserProvider?: BrowserProvider) {}
+
   async search(
     query: string,
     options?: SearchOptions,
@@ -243,44 +246,62 @@ export class SearchService {
     query: string,
     timeoutMs: number,
   ): Promise<RawSearchResult[]> {
-    const browser = await chromium.launch({ headless: true });
+    if (this.browserProvider?.backend === "local") {
+      try {
+        const page = this.browserProvider.getPage("search-fallback");
+        return await this.scrapeWithPage(page, query, timeoutMs);
+      } catch {
+        // Fall through to manual launch if session doesn't exist
+      }
+    }
+
+    const browser = await chromium.launch({
+      headless: true,
+      args: ["--disable-blink-features=AutomationControlled"],
+    });
     try {
       const page = await browser.newPage();
-      page.setDefaultTimeout(timeoutMs);
-      await page.goto(
-        `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-        {
-          waitUntil: "domcontentloaded",
-        },
-      );
-      await page.waitForTimeout(250);
-
-      return await page.$$eval(".result", (nodes) =>
-        nodes
-          .map((node) => {
-            const anchor = node.querySelector("a.result__a, h2 a") as any;
-            const href = anchor?.href || anchor?.getAttribute("href") || "";
-            const title = String(anchor?.textContent || "")
-              .replace(/\s+/g, " ")
-              .trim();
-            const snippetNode = node.querySelector(
-              ".result__snippet, .snippet",
-            );
-            const snippet = String(snippetNode?.textContent || "")
-              .replace(/\s+/g, " ")
-              .trim();
-            return {
-              title,
-              url: href,
-              snippet,
-              engine: "browser_fallback",
-            };
-          })
-          .filter((item) => item.url),
-      );
+      return await this.scrapeWithPage(page, query, timeoutMs);
     } finally {
       await browser.close();
     }
+  }
+
+  private async scrapeWithPage(
+    page: any,
+    query: string,
+    timeoutMs: number,
+  ): Promise<RawSearchResult[]> {
+    page.setDefaultTimeout(timeoutMs);
+    await page.goto(
+      `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+      {
+        waitUntil: "domcontentloaded",
+      },
+    );
+    await page.waitForTimeout(250);
+
+    return await page.$$eval(".result", (nodes: any[]) =>
+      nodes
+        .map((node) => {
+          const anchor = node.querySelector("a.result__a, h2 a") as any;
+          const href = anchor?.href || anchor?.getAttribute("href") || "";
+          const title = String(anchor?.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+          const snippetNode = node.querySelector(".result__snippet, .snippet");
+          const snippet = String(snippetNode?.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
+          return {
+            title,
+            url: href,
+            snippet,
+            engine: "browser_fallback",
+          };
+        })
+        .filter((item) => item.url),
+    );
   }
 
   private rerankAndNormalize(

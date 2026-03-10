@@ -5,7 +5,7 @@
  * execute handlers directly, instead of requiring separate wiring.
  */
 
-import type { Agent } from "../../../agent/src/index.js";
+import type { Agent } from "@nova/agent";
 import type { Runtime } from "../../../runtime/src/index.js";
 import type { ToolDefinition } from "../../../runtime/src/tools.js";
 
@@ -27,12 +27,15 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
     await import("../../../runtime/src/web-agent/orchestrator.js");
   const { WebWorldModelStore } =
     await import("../../../runtime/src/web-agent/world-model.js");
+  const { ReasoningEngine } =
+    await import("../../../agent/src/reasoning/index.js");
 
   const registry = runtime.getTools();
-  const searchService = new SearchService();
   const sessionManager = new WebSessionManager();
+  const searchService = new SearchService(sessionManager.localProvider);
   const actionExecutor = new ActionExecutor(sessionManager);
-  const orchestrator = new WebAgentOrchestrator();
+  const reasoningEngine = new ReasoningEngine(agent);
+  const orchestrator = new WebAgentOrchestrator(reasoningEngine);
   const worldModels = new WebWorldModelStore();
 
   // ── Public tools ──
@@ -40,7 +43,7 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
   registry.register({
     name: "web_search",
     description:
-      "Search the web for information. Returns a list of results with titles, URLs, and snippets. Use this when you need to find current information, facts, news, or answers to questions. For in-depth multi-source research or evidence-backed analysis, use deep_research instead.",
+      "Search the web for information. Returns a list of results with titles, URLs, and snippets. Use this when you need to find current information, facts, news, or answers to questions.",
     category: "browser",
     keywords: ["search", "web", "query", "latest", "news", "find", "look up"],
     examples: [
@@ -82,7 +85,7 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
   registry.register({
     name: "browse",
     description:
-      "Open a URL in a real browser, take a screenshot, and analyze the page visually. This is READ-ONLY — it cannot click buttons, fill forms, or interact with the page. Use this when you just need to see what a page looks like. For clicking, filling forms, or submitting, use web_session_start + web_act instead. For research across multiple sources, use deep_research instead.",
+      "Open a URL in a real browser, take a screenshot, and analyze the page visually. This is READ-ONLY — it cannot click buttons, fill forms, or interact with the page. Use this when you just need to see what a page looks like. For clicking, filling forms, or submitting, use web_session_start + web_act instead.",
     category: "browser",
     keywords: [
       "browse",
@@ -124,14 +127,17 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
     execute: async (params) => {
       const url = String(params.url || "").trim();
       if (!url) throw new Error("Missing url parameter");
-      return await browse(url, agent, params.sendScreenshot === true);
+      return await browse(url, agent, {
+        browserProvider: sessionManager.localProvider,
+        sendScreenshot: params.sendScreenshot === true,
+      });
     },
   });
 
   registry.register({
     name: "scrape",
     description:
-      "Extract readable content from a URL. Best for articles, blog posts, documentation, and text-heavy pages. Faster than browse — use this when you just need the text content, not the visual layout. For comprehensive research across multiple sources, use deep_research instead.",
+      "Extract readable content from a URL. Best for articles, blog posts, documentation, and text-heavy pages. Faster than browse — use this when you just need the text content, not the visual layout.",
     category: "data",
     keywords: [
       "scrape",
@@ -285,11 +291,14 @@ export async function wireTools(runtime: Runtime, agent: Agent): Promise<void> {
     execute: async (params, context) => {
       const sessionId = context?.sessionId || "";
       const wm = worldModels.forSession(sessionId);
-      const decision = orchestrator.decideNext({
+      const decision = await orchestrator.decideNext({
         goal: String(params.goal || ""),
         observation: wm.getLatestObservation(),
         worldModel: wm,
         mode: params.mode as any,
+        history: wm.actions.map(
+          (a) => `${a.action.type}: ${a.success ? "success" : "failed"}`,
+        ),
       });
       return decision;
     },

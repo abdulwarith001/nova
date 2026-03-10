@@ -1,15 +1,10 @@
-import type { Browser } from "playwright";
-import { chromium } from "playwright";
-import type { Agent } from "../../../agent/src/index.ts";
+import type { Agent } from "@nova/agent";
+import type { BrowserProvider } from "./browser-provider.js";
 import { pushPendingImage } from "../pending-images.js";
 
-let sharedBrowser: Browser | null = null;
-
-async function getSharedBrowser(): Promise<Browser> {
-  if (!sharedBrowser || !sharedBrowser.isConnected()) {
-    sharedBrowser = await chromium.launch({ headless: true });
-  }
-  return sharedBrowser;
+interface BrowseOptions {
+  browserProvider: BrowserProvider;
+  sendScreenshot?: boolean;
 }
 
 export interface BrowseResult {
@@ -41,16 +36,22 @@ const VISION_PROMPT = [
 export async function browse(
   url: string,
   agent: Agent,
-  sendScreenshot = false,
+  options: BrowseOptions,
 ): Promise<BrowseResult> {
   const normalizedUrl = url.startsWith("http") ? url : `https://${url}`;
+  const sessionId = `browse-tool-${Date.now()}`;
 
-  const browser = await getSharedBrowser();
-  const context = await browser.newContext({
+  // Start a controlled session via the provider
+  await options.browserProvider.startSession(sessionId, {
+    profileId: "browse-tool",
+    headless: true,
     viewport: { width: 1280, height: 900 },
+    locale: "en-US",
+    timezone: "America/New_York",
   });
+
   try {
-    const page = await context.newPage();
+    const page = options.browserProvider.getPage(sessionId);
     await page.goto(normalizedUrl, {
       waitUntil: "domcontentloaded",
       timeout: 30_000,
@@ -118,7 +119,7 @@ export async function browse(
     }
 
     // Only queue the screenshot if user explicitly asked for it
-    if (sendScreenshot) {
+    if (options.sendScreenshot) {
       pushPendingImage({
         imageBase64: screenshotBase64,
         caption: `📸 ${domData.title || normalizedUrl}`,
@@ -134,6 +135,6 @@ export async function browse(
       links: domData.links,
     };
   } finally {
-    await context.close();
+    await options.browserProvider.endSession(sessionId).catch(() => {});
   }
 }

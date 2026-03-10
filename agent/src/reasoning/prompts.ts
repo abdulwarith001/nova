@@ -45,6 +45,7 @@ Rules:
 
   // Task decomposition
   planSteps: `Break the following task into concrete, actionable sub-steps.
+  Each step should represent a clear milestone in execution.
 
 Output JSON with this shape:
 {
@@ -55,8 +56,9 @@ Output JSON with this shape:
 }
 
 Rules:
-- Each step should be a single, clear action.
+- Each step must be a single, clear action that can be performed with 1-2 tool calls.
 - Order steps logically (dependencies first).
+- descriptive: instead of "Search for X", use "Search for X using web_search to find current status/news".
 - 2-8 steps typically. Don't over-decompose simple tasks.
 - Only reference tools that are actually available.
 `,
@@ -129,15 +131,12 @@ Rules:
 - If the user seems stressed or working late, note it for a caring response.
 
 Tool Selection Guide (use this when needsTools is true):
-- Quick fact, news headline, or simple lookup → toolHints: ["web_search"]
-- Read or summarize a specific URL the user provided → toolHints: ["scrape"] (or ["browse"] if the user wants to see the page visually)
+- Simple facts, current news headlines, weather, or quick lookups → toolHints: ["web_search"]
+- Read or summarize a specific URL the user provided → toolHints: ["scrape"] (or ["browse"] if visual analysis is needed)
 - See what a website looks like, take a screenshot → toolHints: ["browse"]
 - Fill forms, click buttons, log in, interact with a page → toolHints: ["web_session_start"]
-- In-depth research, compare viewpoints, cross-source validation, evidence-backed analysis, investigate a topic → toolHints: ["deep_research"]
-- deep_research handles web_search + scrape + browse internally — never suggest both deep_research AND web_search/scrape/browse for the same query.
-- If the user is following up on a previous research topic, suggest deep_research — it has 24-hour session memory.
+- For simple questions like "who won the game" or "what is X", use web_search.
 - Generate or create images → toolHints: ["generate_image"]
-- If no tool is needed and you can answer directly, set needsTools to false.
 `,
 
   oodaDecide: `You are Nova's decision module. Given your observation and orientation, decide exactly how to respond.
@@ -154,11 +153,68 @@ Output JSON:
 
 Rules:
 - Be decisive. Pick a clear strategy.
+- If an [Execution Plan] is provided in the message history, your strategy MUST focus on the NEXT pending step.
 - Always consider including a curious follow-up question.
 - Match your tone to the user's energy.
-- If the orientation identified toolHints, incorporate them into your strategy and toolPlan.
-- For research or investigation tasks, your strategy MUST mention using deep_research — do not plan to manually chain web_search + scrape.
-- For simple lookups, your strategy should mention web_search or scrape — NOT deep_research.
-- Never plan to call web_search, scrape, or browse separately if deep_research is already planned for the same topic.
+- Use the simplest tool necessary.
 `,
+  // === Web Interaction / Browser Agent Prompts ===
+
+  webOrient: `You are Nova's web interaction orientation module. Analyze the current page state vs the goal.
+
+Output JSON:
+{
+  "pageSummary": "What this page is (e.g. 'Google Search Results', 'Login form')",
+  "relevantElements": "List 3-5 elements on the page that help reach the goal",
+  "status": "Are we on the right track? Are there blockers (CAPTCHA, Popups)?",
+  "approach": "How to proceed — e.g. 'find the login button', 'scroll for more items', 'type query into search'",
+  "confidence": 0.0
+}
+
+Rules:
+- Be concise. Focus only on what matters for the goal.
+- Identify if the page is not what was expected.
+`,
+
+  webDecide: `You are Nova's web interaction decision module. Pick the single best action to move closer to the goal.
+
+Output JSON:
+{
+  "action": {
+    "type": "navigate|click|fill|submit|scroll|wait|extract",
+    "target": {
+      "text": "text on the element",
+      "role": "button|link|textbox|etc",
+      "css": "selector if certain"
+    },
+    "value": "text to type or delta to scroll",
+    "url": "URL to navigate to"
+  },
+  "rationale": "Why this specific action helps reach the goal",
+  "risk": "low|medium|high",
+  "needsConfirmation": false,
+  "confidence": 0.0
+}
+
+Rules:
+- Target elements clearly by text or role.
+- Use 'extract' if the goal is to get information and you are on the right page.
+- Use 'scroll' if you need to find something further down.
+- Risk is 'high' for clearing data, purchasing, or public posts.
+`,
+
+  plannerSystem:
+    "You are Nova's Planning Engine. Your job is to analyze tool calls and identify data dependencies. One tool call depends on another if it uses its output or must run after it for logical correctness.",
+
+  planDependencies: `Analyze the following sequence of tool calls for a task. 
+Identify logical dependencies where a step requires information or a state created by a previous step.
+Consider parameter values (look for placeholders like {{step-N.result}}), tool descriptions, and the overall task goal.
+
+Task Goal: {{goal}}
+Steps:
+{{steps}}
+
+Output a JSON array of dependencies. Each entry should be: { "stepId": string, "dependsOn": string[] }.
+Only include steps that have dependencies. If no dependencies exist, return an empty array [].
+Respond ONLY with the JSON array.`,
 };

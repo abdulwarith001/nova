@@ -13,6 +13,9 @@ export interface RuntimeConfig {
   novaDir?: string;
   security: SecurityConfig;
   executor: ExecutorConfig;
+  planner?: {
+    llmChat?: (prompt: string) => Promise<string>;
+  };
 }
 
 export interface Task {
@@ -66,7 +69,7 @@ export class Runtime {
     const security = new SecurityManager(config.security);
     const tools = new ToolRegistry();
     const executor = new Executor(config.executor);
-    const planner = new Planner();
+    const planner = new Planner(config.planner?.llmChat);
 
     const runtimeInstance = new Runtime(
       executor,
@@ -82,7 +85,10 @@ export class Runtime {
   /**
    * Execute a task
    */
-  async execute(task: Task): Promise<TaskResult> {
+  async execute(
+    task: Task,
+    confirm?: import("./executor").ConfirmationCallback,
+  ): Promise<TaskResult> {
     const startTime = Date.now();
 
     // 1. Plan the execution
@@ -92,7 +98,12 @@ export class Runtime {
     this.security.authorize(plan);
 
     // 3. Execute the plan
-    const result = await this.executor.execute(plan, this.tools);
+    const result = await this.executor.execute(
+      plan,
+      this.tools,
+      this.security,
+      confirm,
+    );
 
     const durationMs = Date.now() - startTime;
 
@@ -119,6 +130,19 @@ export class Runtime {
   }
 
   /**
+   * Check if a tool call requires HitL confirmation
+   */
+  public requiresConfirmation(
+    name: string,
+    params: Record<string, unknown>,
+  ): { required: boolean; reason?: string } {
+    return this.security.requiresConfirmation({
+      toolName: name,
+      parameters: params,
+    });
+  }
+
+  /**
    * Execute a tool by name (for gateway/chat integration)
    */
   async executeTool(
@@ -126,6 +150,42 @@ export class Runtime {
     params: Record<string, unknown>,
     context?: ToolExecutionContext,
   ): Promise<unknown> {
+    // 1. Check for HitL confirmation
+    const hitl = this.security.requiresConfirmation({
+      toolName: name,
+      parameters: params,
+    });
+
+    if (hitl.required) {
+      if (!context?.confirm) {
+        console.error(
+          `🛡️ [Security] Blocked "${name}" - HitL required but no handler provided.`,
+        );
+        throw new Error(
+          `Security Error: action "${name}" requires user confirmation, but the current channel does not support interactive approval.`,
+        );
+      }
+
+      console.log(`🛡️ [Runtime] HitL Required for "${name}": ${hitl.reason}`);
+      const approved = await context.confirm(
+        {
+          id: context.stepId || "direct-call",
+          toolName: name,
+          parameters: params,
+          dependencies: [],
+        },
+        hitl.reason || "Action requires confirmation",
+      );
+
+      if (!approved) {
+        console.log(`🛡️ [Runtime] HitL Confirmation: ❌ DENIED for "${name}"`);
+        throw new Error(
+          `Action cancelled: ${hitl.reason || "User denied permission"}`,
+        );
+      }
+      console.log(`🛡️ [Runtime] HitL Confirmation: ✅ APPROVED for "${name}"`);
+    }
+
     return await this.tools.execute(name, params, context);
   }
 

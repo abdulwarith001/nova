@@ -14,14 +14,19 @@ import { VisionResolver } from "./vision-resolver.js";
 import { canonicalizeUrl, isHttpUrl } from "./url-utils.js";
 
 export class ActionExecutor {
+  private readonly searchService: SearchService;
+
   constructor(
     private readonly sessionManager: WebSessionManager,
     private readonly perception = new PerceptionEngine(),
     private readonly vision = new VisionResolver(),
-    private readonly searchService = new SearchService(),
+    searchService?: SearchService,
     private readonly policyEngine = new PolicyEngine(),
     private readonly telemetry = new WebTelemetry(),
-  ) {}
+  ) {
+    this.searchService =
+      searchService || new SearchService(sessionManager.localProvider);
+  }
 
   async execute(
     sessionId: string,

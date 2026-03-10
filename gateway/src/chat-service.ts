@@ -1,4 +1,5 @@
 import type { Agent, Message } from "../../agent/src/index.js";
+import { ConfirmationCallback } from "../../runtime/src/executor.js";
 import {
   type ResearchEvent,
   type ResearchOrchestrator,
@@ -30,6 +31,7 @@ export interface ChatTurnInput {
   channel: "ws" | "telegram";
   imageBase64?: string;
   onProgress?: (stage: string) => void;
+  confirm?: ConfirmationCallback;
   signal?: AbortSignal;
 }
 
@@ -111,6 +113,7 @@ export class ChatService {
         history,
         sessionId: input.sessionId,
         onProgress: input.onProgress,
+        confirm: input.confirm,
         signal: input.signal,
       });
 
@@ -311,26 +314,7 @@ export class ChatService {
       parts.push("", this.config.skillsSummary);
     }
 
-    // Tool decision guide — helps the agent pick the right tool on the first try
-    parts.push(
-      "",
-      [
-        "## Tool Decision Guide",
-        "",
-        "When the user asks for information, pick the RIGHT tool on the first try:",
-        "",
-        "| Need | Tool | Example |",
-        "|------|------|---------|",
-        '| Quick fact or news headline | `web_search` | "what\'s the weather" |',
-        '| Read a specific article or URL | `scrape` | "summarize this link" |',
-        '| See what a page looks like | `browse` | "check out example.com" |',
-        '| Fill a form or click buttons | `web_session_start` → `web_act` | "log in to my account" |',
-        '| In-depth research, comparison, evidence | `deep_research` | "research EU AI policy" |',
-        "",
-        "**deep_research** handles web_search + scrape + browse internally. Never call them separately for the same research topic.",
-        "If you already used deep_research and the user asks a follow-up, call deep_research again — it has session memory.",
-      ].join("\n"),
-    );
+  
 
     return parts.join("\n");
   }

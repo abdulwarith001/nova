@@ -14,17 +14,8 @@ import type { Agent } from "../../agent/src/index.js";
 export async function wireSkillTools(
   runtime: Runtime,
   agent: Agent,
+  context: { skillLoader: any; skillBuilder: any },
 ): Promise<void> {
-  // Research agent skill (deep research orchestration)
-  try {
-    const researchAgent = await import("../../skills/core/research-agent/tools.js");
-    if (researchAgent.wireTools) {
-      await researchAgent.wireTools(runtime, agent);
-    }
-  } catch (err: any) {
-    console.warn("⚠️ Failed to load research-agent skill:", err.message);
-  }
-
   // Web browsing skill (browse, scrape, web_search, web-agent tools)
   try {
     const webBrowsing = await import("../../skills/core/web-browsing/tools.js");
@@ -80,6 +71,20 @@ export async function wireSkillTools(
     );
   } catch (err: any) {
     console.warn("⚠️ Failed to load computer skill:", err.message);
+  }
+
+  // System skill (skill builders, meta-ops)
+  try {
+    const { registerSystemTools } =
+      await import("../../skills/core/system/tools.js");
+    registerSystemTools(
+      runtime.getTools(),
+      context.skillBuilder,
+      context.skillLoader,
+    );
+    console.log("🛠️ Wired system tools (skill_create, skill_refresh)");
+  } catch (err: any) {
+    console.warn("⚠️ Failed to load system skill:", err.message);
   }
 }
 

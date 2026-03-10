@@ -1,5 +1,6 @@
 import { Agent, type Message } from "../../agent/src/index.js";
 import { Runtime } from "../../runtime/src/index.js";
+import { ConfirmationCallback } from "../../runtime/src/executor.js";
 import {
   ReasoningEngine,
   toReasoningTools,
@@ -10,7 +11,6 @@ import {
   type ChatHistoryMessage,
 } from "./chat-speed.js";
 import { ProfileExtractor } from "../../runtime/src/profile-extractor.js";
-import { ResearchSessionStore } from "../../runtime/src/research-session-store.js";
 
 export interface ResearchSource {
   title: string;
@@ -19,7 +19,8 @@ export interface ResearchSource {
 }
 
 export interface ResearchContract {
-  answer: string;
+  summary: string;
+  fullReport: string;
   sources: ResearchSource[];
   uncertainty: string;
   confidence: number;
@@ -31,6 +32,8 @@ export interface ResearchEvent {
     | "tool_complete"
     | "synthesis_start"
     | "reasoning"
+    | "plan_created"
+    | "plan_progress"
     | "finalized";
   timestamp: number;
   details?: Record<string, unknown>;
@@ -61,6 +64,7 @@ export interface ResearchTurnInput {
   history: ChatHistoryMessage[];
   sessionId?: string;
   onProgress?: (stage: string) => void;
+  confirm?: ConfirmationCallback;
   signal?: AbortSignal;
 }
 
@@ -70,7 +74,6 @@ export interface ResearchOrchestratorConfig {
   maxSources: number;
   enableTelemetry: boolean;
   provider: "openai" | "anthropic";
-  sessionStore?: ResearchSessionStore;
 }
 
 type ToolExecutionResult = {
@@ -85,7 +88,6 @@ const DEFAULT_ERROR_RESPONSE =
 export class ResearchOrchestrator {
   private readonly reasoningEngine: ReasoningEngine;
   private readonly profileExtractor: ProfileExtractor | null;
-  private readonly researchSessionStore: ResearchSessionStore;
 
   constructor(
     private readonly runtime: Runtime,
@@ -93,8 +95,6 @@ export class ResearchOrchestrator {
     private readonly config: ResearchOrchestratorConfig,
   ) {
     this.reasoningEngine = new ReasoningEngine(agent, { mode: "full" });
-    this.researchSessionStore =
-      config.sessionStore || new ResearchSessionStore();
 
     // Dedicated cheap agent for profile extraction
     try {
@@ -160,10 +160,6 @@ export class ResearchOrchestrator {
       24,
     );
 
-    // Run OODA reasoning loop — skip on follow-up turns where session context
-    // already guides the model, saving 3 LLM calls (#5+6)
-    const priorSession = this.researchSessionStore.getActive(userId);
-
     try {
       const memoryContext = this.getMemoryContext(input.message);
       const oodaResult = await this.reasoningEngine.runOODA({
@@ -190,6 +186,40 @@ export class ResearchOrchestrator {
           modelHistory[modelHistory.length - 1],
         ];
       }
+
+      // Proactive Planning: If the task is complex or requires tools, generate a plan
+      const orientThought = oodaResult.thoughts.find(
+        (t) => t.phase === "orient",
+      );
+      const isComplex =
+        orientThought?.content.toLowerCase().includes("tools needed:") ||
+        oodaResult.decision.confidence < 0.7;
+
+      if (isComplex) {
+        try {
+          const plan = await this.reasoningEngine.planSteps(
+            input.message,
+            toReasoningTools(tools),
+            memoryContext,
+          );
+          if (plan && plan.length > 0) {
+            this.pushEvent(events, "plan_created", { steps: plan });
+            const planMarkdown = plan
+              .map((s) => `- [ ] Step ${s.id}: ${s.description}`)
+              .join("\n");
+            modelHistory = [
+              ...modelHistory.slice(0, -1),
+              {
+                role: "system",
+                content: `[Execution Plan]\n${planMarkdown}\n\nFollow this plan systematically. Perform one or two steps at a time using tool calls. Update your progress mentally as you go.`,
+              },
+              modelHistory[modelHistory.length - 1],
+            ];
+          }
+        } catch (planError: any) {
+          console.warn("⚠️ Planning failed (non-fatal):", planError?.message);
+        }
+      }
     } catch (reasoningError: any) {
       console.warn(
         "⚠️ OODA reasoning failed (non-fatal):",
@@ -210,22 +240,6 @@ export class ResearchOrchestrator {
     let fallbackReason: string | undefined;
     let usedWebTool = false;
     const toolResults: ToolExecutionResult[] = [];
-
-    // If a prior research session exists, inject context so the agent knows about it
-    if (priorSession) {
-      modelHistory = [
-        ...modelHistory.slice(0, -1),
-        {
-          role: "system",
-          content: [
-            `[Research context] Active research session on "${priorSession.topic}" (confidence: ${priorSession.confidence}).`,
-            `Open questions: ${JSON.stringify(priorSession.openQuestions?.slice(0, 5) || [])}`,
-            `Use deep_research to continue this session. If user says "start over" or "new topic", pass resetSession: true.`,
-          ].join("\n"),
-        },
-        modelHistory[modelHistory.length - 1],
-      ];
-    }
 
     for (
       let iteration = 0;
@@ -276,8 +290,7 @@ export class ResearchOrchestrator {
           if (
             toolName === "web_search" ||
             toolName === "scrape" ||
-            toolName === "browse" ||
-            toolName === "deep_research"
+            toolName === "browse"
           ) {
             usedWebTool = true;
           }
@@ -303,12 +316,7 @@ export class ResearchOrchestrator {
           });
 
           // Emit progress for Telegram
-          if (toolName === "deep_research") {
-            const topic = (toolCall.parameters as any)?.topic || "your query";
-            input.onProgress?.(
-              `🔍 Researching: "${String(topic).slice(0, 80)}"...`,
-            );
-          } else if (toolName === "web_search") {
+          if (toolName === "web_search") {
             input.onProgress?.("🌐 Searching the web...");
           } else if (toolName === "scrape" || toolName === "browse") {
             input.onProgress?.("📄 Reading sources...");
@@ -319,20 +327,26 @@ export class ResearchOrchestrator {
             JSON.stringify(toolCall.parameters).slice(0, 200),
           );
 
-          // Per-tool timeout: 10 min for deep_research, config default for others
-          const toolTimeout =
-            toolName === "deep_research" ? 600_000 : this.config.toolTimeoutMs;
+          const isHitl = this.runtime.requiresConfirmation(
+            toolName,
+            toolCall.parameters as any,
+          ).required;
+          const toolTimeout = isHitl
+            ? 360_000 // 6 min for human decision
+            : this.config.toolTimeoutMs;
 
-          // Retry once for transient errors (timeout, network)
+          // Retry once for transient errors (unless it's a HitL tool)
           let lastToolError: string | undefined;
           let toolSucceeded = false;
+          const maxAttempts = isHitl ? 1 : 2;
 
-          for (let attempt = 0; attempt < 2; attempt++) {
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
             try {
               const toolStart = performance.now();
               const result = await withTimeout(
                 this.runtime.executeTool(toolName, toolCall.parameters, {
                   sessionId: userId,
+                  confirm: input.confirm,
                 }),
                 toolTimeout,
                 `Tool '${toolName}' timed out after ${toolTimeout}ms`,
@@ -340,7 +354,7 @@ export class ResearchOrchestrator {
               metrics.time_tools_ms += performance.now() - toolStart;
               toolResults.push({ toolName, result });
 
-              const toolMaxChars = toolName === "deep_research" ? 8000 : 1200;
+              const toolMaxChars = 1200;
               if (this.config.provider === "openai" && toolCall.id) {
                 modelHistory.push({
                   role: "tool",
@@ -358,9 +372,6 @@ export class ResearchOrchestrator {
                 name: toolName,
                 success: true,
               });
-              if (toolName === "deep_research") {
-                input.onProgress?.("📝 Synthesizing findings...");
-              }
               toolSucceeded = true;
               console.log(
                 `✅ Tool success: ${toolName} (${(performance.now() - toolStart).toFixed(0)}ms)`,
@@ -400,8 +411,6 @@ export class ResearchOrchestrator {
                 "Make sure you called web_observe first to see the page elements. Try with a different target (use text, placeholder, or name instead of CSS selectors).",
               web_observe:
                 "The session may have ended. Try web_session_start again.",
-              deep_research:
-                "Try reducing scope or specifying focus hints (e.g. regulation, risks, market impact).",
             };
             const hint =
               fallbackHints[toolName] || "Try a different tool or approach.";
@@ -480,7 +489,7 @@ export class ResearchOrchestrator {
       );
     }
 
-    const responseText = research.answer || DEFAULT_ERROR_RESPONSE;
+    const responseText = research.summary || DEFAULT_ERROR_RESPONSE;
 
     const updatedHistory = trimConversationHistory(
       [
@@ -536,7 +545,13 @@ export class ResearchOrchestrator {
       response: responseText,
       success: true,
       history: updatedHistory,
-      research,
+      research: {
+        summary: research.summary,
+        fullReport: research.fullReport,
+        sources: research.sources,
+        uncertainty: research.uncertainty,
+        confidence: research.confidence,
+      },
       events: this.config.enableTelemetry ? events : undefined,
       metrics,
     };
@@ -635,7 +650,8 @@ export class ResearchOrchestrator {
 
     if (!parsed || typeof parsed !== "object") {
       return {
-        answer: raw || DEFAULT_ERROR_RESPONSE,
+        summary: raw || DEFAULT_ERROR_RESPONSE,
+        fullReport: raw || DEFAULT_ERROR_RESPONSE,
         sources: fallbackSources,
         uncertainty:
           fallbackSources.length > 0
@@ -646,9 +662,10 @@ export class ResearchOrchestrator {
     }
 
     const candidate = parsed as any;
-    const answer = String(
-      candidate.answer || raw || DEFAULT_ERROR_RESPONSE,
+    const summary = String(
+      candidate.summary || candidate.answer || raw || DEFAULT_ERROR_RESPONSE,
     ).trim();
+    const fullReport = String(candidate.fullReport || summary).trim();
     const sources = normalizeSources(candidate.sources, this.config.maxSources);
     const uncertainty =
       typeof candidate.uncertainty === "string" && candidate.uncertainty.trim()
@@ -662,7 +679,8 @@ export class ResearchOrchestrator {
     );
 
     return {
-      answer,
+      summary,
+      fullReport,
       sources: sources.length > 0 ? sources : fallbackSources,
       uncertainty,
       confidence,

@@ -106,7 +106,9 @@ export function mapExternalDataEventToProgress(
     if (toolName === "web_session_backend") {
       const backend = String(event.details?.backend || "").trim();
       const liveViewUrl = String(event.details?.liveViewUrl || "").trim();
-      const backendLabel = backend ? `Connected backend: ${backend}` : "Connected browser backend.";
+      const backendLabel = backend
+        ? `Connected backend: ${backend}`
+        : "Connected browser backend.";
       const suffix = liveViewUrl ? ` Live view: ${liveViewUrl}` : "";
       return createProgressEvent("planning", {
         requestId,
@@ -135,7 +137,7 @@ function resolveToolStage(toolName: string): ChatProgressStage {
   if (toolName.startsWith("web_observe")) return "reading_sources";
   if (toolName.startsWith("web_extract_structured")) return "extracting";
   if (toolName.startsWith("web_session_end")) return "finalizing";
-  if (toolName.startsWith("deep_research")) return "synthesizing";
+
   if (
     toolName.includes("search") ||
     toolName.includes("lookup") ||
@@ -143,10 +145,7 @@ function resolveToolStage(toolName: string): ChatProgressStage {
   ) {
     return "searching";
   }
-  if (
-    toolName.includes("fetch") ||
-    toolName.includes("extract")
-  ) {
+  if (toolName.includes("fetch") || toolName.includes("extract")) {
     return "reading_sources";
   }
   return "reading_sources";

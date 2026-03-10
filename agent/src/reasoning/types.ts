@@ -209,3 +209,19 @@ export interface LLMClient {
     history?: Array<{ role: string; content: string }>,
   ): Promise<string>;
 }
+
+export interface WebOODAResult {
+  thoughts: OODAThought[];
+  decision: {
+    action: {
+      type: string;
+      target?: { text?: string; role?: string; css?: string };
+      value?: string;
+      url?: string;
+    };
+    rationale: string;
+    risk: "low" | "medium" | "high";
+    needsConfirmation: boolean;
+    confidence: number;
+  };
+}

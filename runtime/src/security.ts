@@ -3,16 +3,29 @@ import type { ExecutionPlan } from "./executor";
 export interface SecurityConfig {
   allowedTools: string[];
   deniedTools: string[];
+  protectedKeywords?: string[]; // Keywords that trigger HitL confirmation
 }
 
 /**
- * Security manager with capability-based permissions
+ * Security manager with capability-based permissions and HitL confirmation.
  */
 export class SecurityManager {
   private config: SecurityConfig;
 
   constructor(config: SecurityConfig) {
-    this.config = config;
+    this.config = {
+      protectedKeywords: [
+        "delete",
+        "buy",
+        "purchase",
+        "submit",
+        "order",
+        "remove",
+        "kill",
+        "cancel",
+      ],
+      ...config,
+    };
   }
 
   /**
@@ -35,6 +48,38 @@ export class SecurityManager {
         throw new Error(`Tool '${step.toolName}' is denied`);
       }
     }
+  }
+
+  /**
+   * Check if an execution step requires explicit user confirmation (HitL).
+   */
+  requiresConfirmation(step: {
+    toolName: string;
+    parameters: Record<string, any>;
+  }): { required: boolean; reason?: string } {
+    // 1. High-risk system tools always require confirmation
+    const highRiskTools = ["skill_create", "process_kill", "file_write"];
+    if (highRiskTools.includes(step.toolName)) {
+      return {
+        required: true,
+        reason: `High-risk tool '${step.toolName}' requires authorization.`,
+      };
+    }
+
+    // 2. Sensitive keywords in parameters (especially for web_act or shell_exec)
+    const paramsString = JSON.stringify(step.parameters).toLowerCase();
+    const hit = this.config.protectedKeywords?.find((kw) =>
+      paramsString.includes(kw),
+    );
+
+    if (hit) {
+      return {
+        required: true,
+        reason: `Potential high-risk action detected: contains keyword '${hit}'.`,
+      };
+    }
+
+    return { required: false };
   }
 
   /**

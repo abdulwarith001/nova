@@ -21,9 +21,9 @@ describe("WebAgentOrchestrator", () => {
   }
 
   describe("decideNext", () => {
-    it("navigates when goal has explicit URL and no observation", () => {
+    it("navigates when goal has explicit URL and no observation", async () => {
       const wm = new WebWorldModel("s1");
-      const decision = orchestrator.decideNext({
+      const decision = await orchestrator.decideNext({
         goal: "Go to https://example.com and check",
         worldModel: wm,
       });
@@ -32,9 +32,9 @@ describe("WebAgentOrchestrator", () => {
       expect(decision.risk).toBe("low");
     });
 
-    it("searches when goal has no URL and no observation", () => {
+    it("searches when goal has no URL and no observation", async () => {
       const wm = new WebWorldModel("s1");
-      const decision = orchestrator.decideNext({
+      const decision = await orchestrator.decideNext({
         goal: "find latest AI news",
         worldModel: wm,
       });
@@ -42,9 +42,9 @@ describe("WebAgentOrchestrator", () => {
       expect(decision.action.value).toBe("find latest AI news");
     });
 
-    it("clicks when goal says click", () => {
+    it("clicks when goal says click", async () => {
       const wm = new WebWorldModel("s1");
-      const decision = orchestrator.decideNext({
+      const decision = await orchestrator.decideNext({
         goal: 'click "Submit"',
         observation: makeObservation(),
         worldModel: wm,
@@ -53,9 +53,9 @@ describe("WebAgentOrchestrator", () => {
       expect(decision.action.target?.text).toBe("Submit");
     });
 
-    it("fills when goal says fill", () => {
+    it("fills when goal says fill", async () => {
       const wm = new WebWorldModel("s1");
-      const decision = orchestrator.decideNext({
+      const decision = await orchestrator.decideNext({
         goal: 'fill "hello world"',
         observation: makeObservation(),
         worldModel: wm,
@@ -64,9 +64,9 @@ describe("WebAgentOrchestrator", () => {
       expect(decision.action.value).toBe("hello world");
     });
 
-    it("scrolls when goal says scroll and text is short", () => {
+    it("scrolls when goal says scroll and text is short", async () => {
       const wm = new WebWorldModel("s1");
-      const decision = orchestrator.decideNext({
+      const decision = await orchestrator.decideNext({
         goal: "scroll down to see more",
         observation: makeObservation({ visibleText: "short" }),
         worldModel: wm,
@@ -74,9 +74,9 @@ describe("WebAgentOrchestrator", () => {
       expect(decision.action.type).toBe("scroll");
     });
 
-    it("extracts as default action", () => {
+    it("extracts as default action", async () => {
       const wm = new WebWorldModel("s1");
-      const decision = orchestrator.decideNext({
+      const decision = await orchestrator.decideNext({
         goal: "what is on this page",
         observation: makeObservation(),
         worldModel: wm,

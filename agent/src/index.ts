@@ -13,8 +13,10 @@ export interface AgentConfig {
 }
 
 export interface Message {
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool" | "function";
   content: string;
+  tool_call_id?: string;
+  name?: string;
 }
 
 export interface ToolCall {
