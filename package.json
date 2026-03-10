@@ -1,6 +1,6 @@
 {
   "name": "novaa-agent",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Next-generation AI super agent",
   "private": false,
   "bin": {

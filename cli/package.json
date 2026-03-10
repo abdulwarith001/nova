@@ -1,6 +1,6 @@
 {
   "name": "@nova/cli",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "type": "module",
   "description": "Nova CLI for managing AI super agent",
   "main": "dist/index.js",
