@@ -649,69 +649,71 @@ export class TelegramChannel {
 
   /**
    * Send a streaming draft message using Telegram's sendMessageDraft API.
-   * Incrementally updates the message as text is generated.
+   * Native streaming bubble for real-time AI responses (Bot API 9.5+).
    */
+  private async sendMessageDraft(
+    chatId: number,
+    text: string,
+    draftId: number,
+  ): Promise<void> {
+    try {
+      await this.callTelegramApi(
+        "sendMessageDraft",
+        {
+          chat_id: chatId,
+          text,
+          draft_id: draftId,
+          disable_web_page_preview: true,
+        },
+      );
+    } catch {
+      // Ignore transient draft errors
+    }
+  }
 
   /**
    * Stream the delivery of an already-generated response to Telegram.
-   * Tries progressive reveal via sendMessageDraft, then sends a permanent message.
+   * Uses Bot API 9.5 native streaming (sendMessageDraft) to simulate typing speed,
+   * then sends a permanent message.
    */
   private async streamDelivery(chatId: number, text: string): Promise<void> {
-    // Short responses — just send directly
-    if (text.length < 150) {
+    // Short responses — just send directly (e.g. "Yes.", "Done.")
+    if (text.length < 15) {
       await this.sendChunkedMessage(chatId, text);
       return;
     }
 
-    const CHUNK_SIZE = 160;
-    const STEP_DELAY_MS = 250; // Respect rate limits better
+    const CHUNK_SIZE = 25; // Smaller chunks for a smoother typing effect
+    const STEP_DELAY_MS = 60; // Delay to simulate typing and respect rate limits
+    const draftId = Math.floor(Math.random() * 1_000_000_000);
     let cursor = 0;
-    let messageId: number | undefined;
 
-    try {
-      // Send initial chunk
-      cursor = Math.min(CHUNK_SIZE, text.length);
-      const initial = text.slice(0, cursor);
-      messageId = await this.sendMessageAndGetId(
-        chatId,
-        formatStreamingChunk(initial),
-      );
-
-      // Progressive reveal via edits
-      while (cursor < text.length) {
-        cursor = Math.min(cursor + CHUNK_SIZE, text.length);
-        if (cursor < text.length) {
-          // Try to break at space for better visual flow
-          const nextSpace = text.indexOf(" ", cursor);
-          if (nextSpace !== -1 && nextSpace - cursor < 30) {
-            cursor = nextSpace + 1;
-          }
-        }
-
-        const partial = text.slice(0, cursor);
-        const formatted = formatStreamingChunk(partial);
-
-        await this.editMessage(chatId, messageId, formatted);
-
-        if (cursor < text.length) {
-          await waitMs(STEP_DELAY_MS);
+    // Progressive reveal via draft edits
+    while (cursor < text.length) {
+      cursor = Math.min(cursor + CHUNK_SIZE, text.length);
+      if (cursor < text.length) {
+        // Try to break at space for better visual flow
+        const nextSpace = text.indexOf(" ", cursor);
+        if (nextSpace !== -1 && nextSpace - cursor < 30) {
+          cursor = nextSpace + 1;
         }
       }
 
-      // Finalize with full markdown-to-html conversion for the whole text
-      const finalHtml = markdownToTelegramHtml(text);
-      await this.editMessage(chatId, messageId, finalHtml);
-    } catch (err: any) {
-      console.warn(
-        "Progressive delivery failed, falling back to chunked:",
-        err?.message || err,
-      );
-      // If editing failed or initial send failed, try chunked delivery as ultimate fallback
-      if (messageId) {
-        await this.deleteMessage(chatId, messageId).catch(() => {});
+      const partial = text.slice(0, cursor);
+      const formatted = formatStreamingChunk(partial);
+
+      await this.sendMessageDraft(chatId, formatted, draftId);
+
+      if (cursor < text.length) {
+        await waitMs(STEP_DELAY_MS);
       }
-      await this.sendChunkedMessage(chatId, text);
     }
+
+    // Clear the draft bubble explicitly
+    await this.sendMessageDraft(chatId, "", draftId);
+
+    // Finalize with full markdown-to-html conversion for the whole text
+    await this.sendChunkedMessage(chatId, text);
   }
 
   /**

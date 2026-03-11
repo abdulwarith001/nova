@@ -1,6 +1,6 @@
 {
   "name": "novaa-agent",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Next-generation AI super agent",
   "private": false,
   "bin": {
@@ -95,6 +95,7 @@
     "@anthropic-ai/sdk": "^0.17.0",
     "@fastify/cors": "^9.0.0",
     "@fastify/websocket": "^10.0.0",
+    "@inquirer/prompts": "^8.2.0",
     "@mozilla/readability": "^0.6.0",
     "bcrypt": "^5.1.1",
     "better-sqlite3": "^9.3.0",
@@ -111,7 +112,6 @@
     "gray-matter": "^4.0.3",
     "hnswlib-node": "^3.0.0",
     "inquirer": "^13.2.2",
-    "@inquirer/prompts": "^8.2.0",
     "isolated-vm": "^4.7.2",
     "jsdom": "^28.1.0",
     "jsonwebtoken": "^9.0.2",

@@ -159,6 +159,7 @@ export class ResearchOrchestrator {
       [...input.history, { role: "user", content: input.message }],
       24,
     );
+    let generatedPlanSteps: string[] | undefined;
 
     try {
       const memoryContext = this.getMemoryContext(input.message);
@@ -203,6 +204,7 @@ export class ResearchOrchestrator {
             memoryContext,
           );
           if (plan && plan.length > 0) {
+            generatedPlanSteps = plan.map(s => s.description);
             this.pushEvent(events, "plan_created", { steps: plan });
             const planMarkdown = plan
               .map((s) => `- [ ] Step ${s.id}: ${s.description}`)
@@ -524,6 +526,7 @@ export class ResearchOrchestrator {
     console.log(
       JSON.stringify({
         type: "research_turn_metrics",
+        plan: generatedPlanSteps,
         ...metrics,
       }),
     );
